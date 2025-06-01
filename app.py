@@ -1,6 +1,7 @@
 from flask import Flask, request, send_file
 import requests
 from qa_dashboard_generator import ComprehensiveQADashboard
+import os  # Necesario para verificar existencia del archivo
 
 app = Flask(__name__)
 
@@ -15,12 +16,12 @@ def generate_dashboard():
         if not excel_url:
             return {"error": "Missing 'url' in request body"}, 400
 
-        # Descargar Excel desde URL
+        # Descargar el archivo desde la URL pública
         response = requests.get(excel_url)
         with open("reporte_tarjetas.xlsx", "wb") as f:
             f.write(response.content)
 
-        # Generar dashboard
+        # Generar el dashboard con la clase
         dashboard = ComprehensiveQADashboard()
         dashboard.save_dashboard("qa-dashboard.html")
 
@@ -30,10 +31,11 @@ def generate_dashboard():
 
 @app.route("/qa-dashboard.html")
 def serve_dashboard():
+    if not os.path.exists("qa-dashboard.html"):
+        return "❌ Aún no se ha generado el dashboard. Sube un archivo Excel primero.", 404
     return send_file("qa-dashboard.html")
 
+# Render requiere que el backend escuche en el puerto especificado por la variable de entorno PORT
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
