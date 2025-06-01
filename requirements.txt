@@ -1,5 +1,6 @@
-Flask
+Flask==2.2.5
 pandas
+numpy
 openpyxl
+gunicorn
 requests
-
