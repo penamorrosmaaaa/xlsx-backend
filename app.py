@@ -1,9 +1,11 @@
 from flask import Flask, request, send_file
+from flask_cors import CORS
 import requests
+import os
 from qa_dashboard_generator import ComprehensiveQADashboard
-import os  # Necesario para verificar existencia del archivo
 
 app = Flask(__name__)
+CORS(app)  # 👈 habilita CORS
 
 @app.route("/")
 def home():
@@ -16,12 +18,10 @@ def generate_dashboard():
         if not excel_url:
             return {"error": "Missing 'url' in request body"}, 400
 
-        # Descargar el archivo desde la URL pública
         response = requests.get(excel_url)
         with open("reporte_tarjetas.xlsx", "wb") as f:
             f.write(response.content)
 
-        # Generar el dashboard con la clase
         dashboard = ComprehensiveQADashboard()
         dashboard.save_dashboard("qa-dashboard.html")
 
@@ -35,7 +35,6 @@ def serve_dashboard():
         return "❌ Aún no se ha generado el dashboard. Sube un archivo Excel primero.", 404
     return send_file("qa-dashboard.html")
 
-# Render requiere que el backend escuche en el puerto especificado por la variable de entorno PORT
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
