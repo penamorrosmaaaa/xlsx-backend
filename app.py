@@ -15,7 +15,6 @@ HEADERS = {
     "Authorization": f"Bearer {SUPABASE_KEY}",
 }
 
-# 🟢 Auto-generación al iniciar el servidor
 def descargar_excel_desde_supabase():
     try:
         print("🔄 Buscando archivo más reciente en Supabase...")
@@ -37,18 +36,14 @@ def descargar_excel_desde_supabase():
     except Exception as e:
         print(f"⚠️ No se pudo regenerar dashboard: {e}")
 
-# 🚀 Flask app
 app = Flask(__name__)
 CORS(app, origins=["*"])
 
-@app.before_first_request
-def auto_generate_if_possible():
-    descargar_excel_desde_supabase()
-
 @app.route("/")
 def home():
+    descargar_excel_desde_supabase()
     return jsonify({
-        "status": "✅ Backend online",
+        "status": "✅ Backend online y dashboard regenerado",
         "version": "1.0.0",
         "endpoints": {
             "generate": "/generate (POST)",
