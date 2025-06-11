@@ -87,7 +87,8 @@ class ComprehensiveQADashboard:
             'Web/App': ['web/app', 'web o app'],
             'Sitio': ['sitio'],
             'Plataforma': ['plataforma'],
-            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad']
+            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad'],
+            'Nombre de la Tarjeta': ['nombre de la tarjeta', 'nombre tarjeta', 'tarjeta'] # Added 'Nombre de la Tarjeta'
         }
 
         for expected_col, variations in expected_cols_mapping.items():
@@ -412,7 +413,9 @@ class ComprehensiveQADashboard:
             'sites': self.get_site_statistics_complete(),
             'platforms': self.get_platform_report(),
             'weeks_list': self.weeks_list,
-            'total_weeks': len(self.weeks_list)
+            'total_weeks': len(self.weeks_list),
+            # ADDED: Expose the full data to JavaScript for detailed lookups
+            'all_cards_data': self.all_data.to_dict(orient='records')
         }
 
         return stats
@@ -516,8 +519,8 @@ class ComprehensiveQADashboard:
             width: 200%;
             height: 200%;
             background: radial-gradient(circle at 20% 50%, var(--primary-light) 0%, transparent 50%),
-                                radial-gradient(circle at 80% 80%, var(--secondary) 0%, transparent 50%),
-                                radial-gradient(circle at 40% 20%, var(--accent) 0%, transparent 50%);
+                                 radial-gradient(circle at 80% 80%, var(--secondary) 0%, transparent 50%),
+                                 radial-gradient(circle at 40% 20%, var(--accent) 0%, transparent 50%);
             opacity: 0.1;
             animation: float 20s ease-in-out infinite;
         }
@@ -1229,6 +1232,76 @@ class ComprehensiveQADashboard:
             border-color: var(--border);
         }
 
+        /* Modal Styles */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed; /* Stay in place */
+            z-index: 1001; /* Sit on top */
+            left: 0;
+            top: 0;
+            width: 100%; /* Full width */
+            height: 100%; /* Full height */
+            overflow: auto; /* Enable scroll if needed */
+            background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(20px);
+            margin: auto;
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            border: 1px solid var(--border);
+            width: 80%;
+            max-width: 600px;
+            box-shadow: var(--shadow-2xl);
+            position: relative;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .close-button {
+            color: var(--text-secondary);
+            float: right;
+            font-size: 2.5rem;
+            font-weight: bold;
+            position: absolute;
+            top: 1rem;
+            right: 1.5rem;
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+
+        .close-button:hover,
+        .close-button:focus {
+            color: var(--danger);
+            text-decoration: none;
+        }
+
+        [data-theme="dark"] .modal-content {
+            background: rgba(30, 41, 59, 0.9);
+            border-color: var(--border);
+        }
+
+        #cardNamesList li {
+            padding: 0.5rem 0;
+            border-bottom: 1px dashed var(--border);
+            color: var(--text-primary);
+        }
+
+        #cardNamesList li:last-child {
+            border-bottom: none;
+        }
+
+        #cardDetailsTitle {
+            color: var(--primary);
+            margin-bottom: 1.5rem;
+            font-size: 1.8rem;
+        }
+
         /* Animations */
         .pulse {
             animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -1802,6 +1875,14 @@ class ComprehensiveQADashboard:
         </div>
     </div>
 
+    <div id="cardDetailsModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-button" onclick="closeModal()">&times;</span>
+            <h3 id="cardDetailsTitle"></h3>
+            <ul id="cardNamesList" style="list-style-type: none; padding: 0;"></ul>
+        </div>
+    </div>
+
     <script>
         // Global data
         const statsData = """ + json.dumps(stats) + """;
@@ -2324,12 +2405,20 @@ class ComprehensiveQADashboard:
             if (!weeklyData || Object.keys(weeklyData).length === 0) {
                 html += '<tr><td colspan="5" style="text-align: center;">No weekly data available</td></tr>';
             } else {
-                for (const week of statsData.weeks_list) {
+                // Sort weeks for consistent display
+                const sortedWeeks = Object.keys(weeklyData).sort((a, b) => {
+                    // Extract week numbers for sorting (e.g., 'tarjetas semana 1' -> 1)
+                    const weekNumA = parseInt(a.replace('tarjetas semana ', ''));
+                    const weekNumB = parseInt(b.replace('tarjetas semana ', ''));
+                    return weekNumA - weekNumB;
+                });
+
+                for (const week of sortedWeeks) { // Iterate through sorted weeks
                     const data = weeklyData[week];
                     if (data) {
                         const badgeClass = data.porcentaje_rechazo > 20 ? 'badge-danger' : 
                                              data.porcentaje_rechazo > 10 ? 'badge-warning' : 'badge-success';
-                        html += `<tr>
+                        html += `<tr style="cursor: pointer;" ondblclick="showCardDetails('${devName}', '${devType}', '${week}')">
                             <td>${week.replace('tarjetas semana ', 'Week ')}</td>
                             <td>${data.total_tarjetas}</td>
                             <td>${data.rechazadas}</td>
@@ -2347,6 +2436,50 @@ class ComprehensiveQADashboard:
             detailsDiv.style.display = 'block';
             detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
+
+        // New function to show exact card names
+        function showCardDetails(devName, devType, week) {
+            let filteredCards = [];
+            
+            if (statsData.all_cards_data) { // Check if the raw data is available
+                filteredCards = statsData.all_cards_data.filter(card => 
+                    card.Desarrollador === devName && 
+                    // Convert devType to match how it's stored in the 'Web/App' column ('Web' or 'App')
+                    card['Web/App'] === (devType.charAt(0).toUpperCase() + devType.slice(1)) && 
+                    card.Semana === week
+                );
+            } else {
+                console.error("Original card data (all_cards_data) not available in statsData.");
+                alert("Cannot display card details. Original data not found.");
+                return;
+            }
+
+            const cardNamesList = document.getElementById('cardNamesList');
+            cardNamesList.innerHTML = ''; // Clear previous details
+
+            if (filteredCards.length > 0) {
+                document.getElementById('cardDetailsTitle').textContent = `Cards for ${devName} (${devType.charAt(0).toUpperCase() + devType.slice(1)}) - Week ${week.replace('tarjetas semana ', '')}`;
+                filteredCards.forEach(card => {
+                    // Use 'Nombre de la Tarjeta' or other variations from your clean_data mapping
+                    const cardName = card['Nombre de la Tarjeta'] || card['Nombre Tarjeta'] || card.Tarjeta || 'Unnamed Card';
+                    const li = document.createElement('li');
+                    li.textContent = cardName; 
+                    cardNamesList.appendChild(li);
+                });
+            } else {
+                document.getElementById('cardDetailsTitle').textContent = `No Cards Found for ${devName} (${devType.charAt(0).toUpperCase() + devType.slice(1)}) - Week ${week.replace('tarjetas semana ', '')}`;
+                const li = document.createElement('li');
+                li.textContent = "No cards found for this developer in this week.";
+                cardNamesList.appendChild(li);
+            }
+
+            document.getElementById('cardDetailsModal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('cardDetailsModal').style.display = 'none';
+        }
+
 
         // Weekly View
         function updateWeeklyView() {
@@ -2550,16 +2683,24 @@ if __name__ == "__main__":
     # import shutil
 
     # # Ruta completa del archivo generado
-    # source = 'qa-dashboard.html'
+    # # source = 'qa-dashboard.html'
 
     # # Ruta donde está la carpeta `public/` de tu React app
-    # destination = '/Users/manuelpenamorros/Desktop/DASHTVA/public/qa-dashboard.html'
+    # # destination = '/Users/manuelpenamorros/Desktop/DASHTVA/public/qa-dashboard.html'
 
     # try:
-    #     shutil.move(source, destination)
-    #     print("✅ ¡Archivo movido correctamente a la carpeta public de React!")
+    # #     shutil.move(source, destination)
+    #      print("✅ ¡Archivo movido correctamente a la carpeta public de React!")
     # except Exception as e:
-    #     print(f"❌ Error al mover el archivo: {e}")
-    print("The Python script has been updated to include 'Tester' in the QA section.")
+    #      print(f"❌ Error al mover el archivo: {e}")
+    print("The Python script has been updated to include 'Tester' in the QA section and enable double-click to see card names.")
     print("Please note: The parts of the script that interact with the local file system (tkinter and shutil) have been commented out for compatibility with this environment.")
     print("You can copy this code and run it in your local Python environment with the required Excel file.")
+
+    # Example usage for local testing (uncomment if you want to run it without Tkinter)
+    try:
+        dashboard = ComprehensiveQADashboard()
+        dashboard.save_dashboard(filename="qa-dashboard.html")
+        print("Dashboard generated successfully. Open 'qa-dashboard.html' in your browser.")
+    except Exception as e:
+        print(f"An error occurred during dashboard generation: {e}")
