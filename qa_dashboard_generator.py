@@ -87,8 +87,7 @@ class ComprehensiveQADashboard:
             'Web/App': ['web/app', 'web o app'],
             'Sitio': ['sitio'],
             'Plataforma': ['plataforma'],
-            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad'],
-            'Descripción': ['descripción', 'description'] # Ensure 'Descripción' is correctly mapped
+            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad']
         }
 
         for expected_col, variations in expected_cols_mapping.items():
@@ -255,16 +254,12 @@ class ComprehensiveQADashboard:
                 aceptadas_week = len(week_dev_data[week_dev_data['Aceptado/Rechazado'] == 'APROBADO'])
                 porcentaje_rechazo_week = round((rechazadas_week / total_week * 100) if total_week > 0 else 0, 2)
 
-                # Get detailed cards for the week and developer
-                cards_for_week_dev = week_dev_data[['Descripción', 'Aceptado/Rechazado']].fillna("Desconocido").to_dict('records')
-
                 if total_week > 0:
                     weekly_summary[semana] = {
                         'total_tarjetas': total_week,
                         'rechazadas': rechazadas_week,
                         'aceptadas': aceptadas_week,
-                        'porcentaje_rechazo': porcentaje_rechazo_week,
-                        'cards': cards_for_week_dev
+                        'porcentaje_rechazo': porcentaje_rechazo_week
                     }
             dev_weekly_details[dev] = weekly_summary
 
@@ -398,18 +393,6 @@ class ComprehensiveQADashboard:
 
         return cleaned_counts
 
-    def get_cards_by_week(self, week):
-        """Devuelve las tarjetas detalladas (descripción y estado) por semana"""
-        week_data = self.all_data[self.all_data['Semana'] == week]
-        # Ensure 'Descripción' column exists, otherwise handle it
-        if 'Descripción' not in week_data.columns:
-            print(f"Warning: 'Descripción' column not found in data for week {week}. Cards will not show descriptions.")
-            # Return only the status if description is missing
-            cards = week_data[['Aceptado/Rechazado']].fillna("Desconocido").to_dict('records')
-        else:
-            cards = week_data[['Descripción', 'Aceptado/Rechazado']].fillna("Desconocido").to_dict('records')
-        return cards
-
     def generate_all_statistics(self):
         """Genera TODAS las estadísticas solicitadas"""
         print("Generando estadísticas completas...")
@@ -430,10 +413,6 @@ class ComprehensiveQADashboard:
             'platforms': self.get_platform_report(),
             'weeks_list': self.weeks_list,
             'total_weeks': len(self.weeks_list)
-        }
-
-        stats['cards_by_week'] = {
-            week: self.get_cards_by_week(week) for week in self.weeks_list
         }
 
         return stats
@@ -1927,9 +1906,6 @@ class ComprehensiveQADashboard:
                         loadSiteCharts();
                         break;
                     case 'weekly':
-                        // Reset weekly view state when switching to it
-                        weeklyViewStates.showingDetails = false;
-                        weeklyViewStates.lastClickedWeek = null; // Important to reset for correct initial load
                         updateWeeklyView();
                         break;
                 }
@@ -2333,258 +2309,138 @@ class ComprehensiveQADashboard:
             Plotly.newPlot('siteChart', siteTraces, siteLayout, plotlyConfig);
         }
 
-        // Developer Details and Toggle
-        let lastClickedDev = { name: null, type: null, showingDetails: false }; // tracks currently displayed summary view
-
+        // Developer Details
         function showDevDetails(devName, devType) {
-            const detailsDivId = devType === 'web' ? 'devWebDetails' : 'devAppDetails';
-            const detailsDiv = document.getElementById(detailsDivId);
-
-            // Check if it's a second double-click on the SAME developer AND currently showing the summary table
-            if (lastClickedDev.name === devName && lastClickedDev.type === devType && lastClickedDev.showingDetails) {
-                // This means the summary is currently visible, so we switch to detailed cards
-                const devWeeklyData = devType === 'web' ? statsData.dev_web_weekly_details[devName] : statsData.dev_app_weekly_details[devName];
-
-                let html = `<h3>Detailed Cards for ${devName}</h3>`;
-                
-                // Add a dropdown to select the week for detailed cards
-                html += '<div style="margin-bottom: 1rem; display: flex; align-items: center;">'; // Added flex for alignment
-                html += '<label style="font-weight: 600; margin-right: 0.5rem; color: var(--text-primary);">Select Week:</label>';
-                html += '<div class="custom-select" style="min-width: 180px;">'; // Adjusted min-width for dropdown
-                html += `<select id="devWeeklyCardSelector" onchange="displayDevWeeklyCards('${devName}', '${devType}', this.value)">`;
-                html += '<option value="">-- Select a Week --</option>'; // Default empty option
-                
-                // Populate dropdown with weeks where developer has cards
+            const weeklyData = devType === 'web' ? 
+                statsData.dev_web_weekly_details[devName] : 
+                statsData.dev_app_weekly_details[devName];
+            
+            const targetDiv = devType === 'web' ? 'devWebDetails' : 'devAppDetails';
+            
+            let html = `<h3>Weekly Performance: ${devName}</h3>`;
+            html += '<table style="width: 100%; margin-top: 1rem;">';
+            html += '<thead><tr><th>Week</th><th>Total Cards</th><th>Rejected</th><th>Accepted</th><th>Rejection Rate</th></tr></thead><tbody>';
+            
+            if (!weeklyData || Object.keys(weeklyData).length === 0) {
+                html += '<tr><td colspan="5" style="text-align: center;">No weekly data available</td></tr>';
+            } else {
                 for (const week of statsData.weeks_list) {
-                    if (devWeeklyData[week] && devWeeklyData[week].cards && devWeeklyData[week].cards.length > 0) {
-                        html += `<option value="${week}">${week.replace('tarjetas semana ', 'Week ')}</option>`;
+                    const data = weeklyData[week];
+                    if (data) {
+                        const badgeClass = data.porcentaje_rechazo > 20 ? 'badge-danger' : 
+                                             data.porcentaje_rechazo > 10 ? 'badge-warning' : 'badge-success';
+                        html += `<tr>
+                            <td>${week.replace('tarjetas semana ', 'Week ')}</td>
+                            <td>${data.total_tarjetas}</td>
+                            <td>${data.rechazadas}</td>
+                            <td>${data.aceptadas}</td>
+                            <td><span class="badge ${badgeClass}">${data.porcentaje_rechazo}%</span></td>
+                        </tr>`;
                     }
                 }
-                html += '</select>';
-                html += '</div></div>';
-
-                html += '<div id="devCardsByWeekContent"></div>'; // This will be populated by displayDevWeeklyCards
-
-                detailsDiv.innerHTML = html;
-                detailsDiv.style.display = 'block';
-                detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                
-                // Crucial: Reset showingDetails to false, so the next double-click on the *same developer*
-                // will revert to the summary view. The week selector is now the primary interaction.
-                lastClickedDev.showingDetails = false; 
-
-            } else {
-                // First double-click on a developer (or a different developer) always shows the weekly summary
-                const weeklyData = devType === 'web' ? 
-                    statsData.dev_web_weekly_details[devName] : 
-                    statsData.dev_app_weekly_details[devName];
-                
-                let html = `<h3>Weekly Performance: ${devName}</h3>`;
-                html += '<table style="width: 100%; margin-top: 1rem;">';
-                html += '<thead><tr><th>Week</th><th>Total Cards</th><th>Rejected</th><th>Accepted</th><th>Rejection Rate</th></tr></thead><tbody>';
-                
-                if (!weeklyData || Object.keys(weeklyData).length === 0) {
-                    html += '<tr><td colspan="5" style="text-align: center;">No weekly data available</td></tr>';
-                } else {
-                    for (const week of statsData.weeks_list) {
-                        const data = weeklyData[week];
-                        if (data) {
-                            const badgeClass = data.porcentaje_rechazo > 20 ? 'badge-danger' : 
-                                                 data.porcentaje_rechazo > 10 ? 'badge-warning' : 'badge-success';
-                            html += `<tr>
-                                    <td>${week.replace('tarjetas semana ', 'Week ')}</td>
-                                    <td>${data.total_tarjetas}</td>
-                                    <td>${data.rechazadas}</td>
-                                    <td>${data.aceptadas}</td>
-                                    <td><span class="badge ${badgeClass}">${data.porcentaje_rechazo}%</span></td>
-                                </tr>`;
-                        }
-                    }
-                }
-                
-                html += '</tbody></table>';
-                
-                detailsDiv.innerHTML = html;
-                detailsDiv.style.display = 'block';
-                detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                
-                // Store the current developer and set flag to true (showing summary)
-                lastClickedDev.name = devName;
-                lastClickedDev.type = devType;
-                lastClickedDev.showingDetails = true; 
             }
+            
+            html += '</tbody></table>';
+            
+            const detailsDiv = document.getElementById(targetDiv);
+            detailsDiv.innerHTML = html;
+            detailsDiv.style.display = 'block';
+            detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
-        // Function to display detailed cards for a specific developer and week
-        function displayDevWeeklyCards(devName, devType, selectedWeek) {
-            const devWeeklyData = devType === 'web' ? statsData.dev_web_weekly_details[devName] : statsData.dev_app_weekly_details[devName];
-            const cards = devWeeklyData[selectedWeek] ? devWeeklyData[selectedWeek].cards : [];
-
-            let cardsHtml = '<div class="table-container" style="margin-top: 1rem;"><table><thead><tr><th>Descripción</th><th>Estado</th></tr></thead><tbody>';
-
-            if (cards.length === 0) {
-                cardsHtml += '<tr><td colspan="2" style="text-align: center;">No cards found for this week.</td></tr>';
-            } else {
-                for (const card of cards) {
-                    const badgeClass = card['Aceptado/Rechazado'] === 'RECHAZADO'
-                        ? 'badge-danger'
-                        : card['Aceptado/Rechazado'] === 'APROBADO'
-                        ? 'badge-success'
-                        : 'badge['Aceptado/Rechazado'] === 'PENDIENTE' ? 'badge-warning' : 'badge-warning'; // Fallback
-
-                    const description = card['Descripción'] || 'No Description Available';
-
-                    cardsHtml += `<tr>
-                                    <td>${description}</td>
-                                    <td><span class="badge ${badgeClass}">${card['Aceptado/Rechazado']}</span></td>
-                                 </tr>`;
-                }
-            }
-            cardsHtml += '</tbody></table></div>';
-            document.getElementById('devCardsByWeekContent').innerHTML = cardsHtml;
-        }
-
-
-        // Weekly View State management (moved to a dedicated object for clarity)
-        const weeklyViewStates = {
-            lastClickedWeek: null,
-            showingDetails: false // false = summary, true = detailed cards
-        };
-
+        // Weekly View
         function updateWeeklyView() {
             const selectedWeek = document.getElementById('weekSelector').value;
-            const weeklyContentDiv = document.getElementById('weeklyContent');
+            const weekData = {
+                qa: statsData.qa.weekly[selectedWeek],
+                web: statsData.web.weekly[selectedWeek],
+                app: statsData.app.weekly[selectedWeek],
+                pm: statsData.pm.por_semana[selectedWeek]
+            };
 
-            // If the selected week is different, always show summary first
-            if (selectedWeek !== weeklyViewStates.lastClickedWeek) {
-                weeklyViewStates.showingDetails = false;
+            let html = '<div class="stats-grid">';
+            
+            // QA Stats
+            html += '<div class="stat-card">';
+            html += '<div class="stat-icon">👥</div>';
+            html += '<div class="stat-label">Total Cards</div>';
+            html += '<div class="stat-value">' + weekData.qa.total_semana + '</div>';
+            html += '<div class="stat-change negative">';
+            html += weekData.qa.total_rechazadas_semana + ' rejected';
+            html += '</div>';
+            html += '</div>';
+
+            // Web Stats
+            html += '<div class="stat-card">';
+            html += '<div class="stat-icon">🌐</div>';
+            html += '<div class="stat-label">Web Performance</div>';
+            html += '<div class="stat-value">' + weekData.web.revisadas + '</div>';
+            html += '<div class="progress-bar" style="margin-top: 1rem;">';
+            html += '<div class="progress-fill" style="width: ' + (100 - weekData.web.porcentaje_rechazo) + '%"></div>';
+            html += '</div>';
+            html += '<div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.875rem;">';
+            html += '<span style="color: var(--success);">✓ ' + weekData.web.aceptadas + '</span>';
+            html += '<span style="color: var(--danger);">✗ ' + weekData.web.rechazadas + '</span>';
+            html += '</div>';
+            html += '</div>';
+
+            // App Stats
+            html += '<div class="stat-card">';
+            html += '<div class="stat-icon">📱</div>';
+            html += '<div class="stat-label">App Performance</div>';
+            html += '<div class="stat-value">' + weekData.app.revisadas + '</div>';
+            html += '<div class="progress-bar" style="margin-top: 1rem;">';
+            html += '<div class="progress-fill" style="width: ' + (100 - weekData.app.porcentaje_rechazo) + '%"></div>';
+            html += '</div>';
+            html += '<div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.875rem;">';
+            html += '<span style="color: var(--success);">✓ ' + weekData.app.aceptadas + '</span>';
+            html += '<span style="color: var(--danger);">✗ ' + weekData.app.rechazadas + '</span>';
+            html += '</div>';
+            html += '</div>';
+
+            // Priority Stats
+            html += '<div class="stat-card">';
+            html += '<div class="stat-icon">📊</div>';
+            html += '<div class="stat-label">Priority Distribution</div>';
+            html += '<div style="margin-top: 1rem;">';
+            html += '<div class="metric-card">';
+            html += '<div class="metric-label">🔴 High Priority</div>';
+            html += '<div class="metric-value">' + weekData.pm.alta + '</div>';
+            html += '</div>';
+            html += '<div class="metric-card">';
+            html += '<div class="metric-label">🟡 Medium Priority</div>';
+            html += '<div class="metric-value">' + weekData.pm.media + '</div>';
+            html += '</div>';
+            html += '<div class="metric-card">';
+            html += '<div class="metric-label">🟢 Low Priority</div>';
+            html += '<div class="metric-value">' + weekData.pm.baja + '</div>';
+            html += '</div>';
+            html += '</div>';
+            html += '</div>';
+            
+            html += '</div>';
+
+            // QA Performance Table
+            html += '<div class="table-container" style="margin-top: 2rem;">';
+            html += '<h3 style="padding: 1rem; font-size: 1.25rem;">QA Performance This Week</h3>';
+            html += '<table><thead><tr><th>QA/PM</th><th>Cards Reviewed</th><th>Cards Rejected</th><th>Rejection Rate</th></tr></thead><tbody>';
+
+            for (const [qa, count] of Object.entries(weekData.qa.tarjetas_por_qa)) {
+                const rejected = weekData.qa.rechazadas_por_qa[qa] || 0;
+                const rate = count > 0 ? (rejected / count * 100).toFixed(1) : 0;
+                const badgeClass = rate > 20 ? 'badge-danger' : rate > 10 ? 'badge-warning' : 'badge-success';
+                html += `<tr>
+                    <td>${qa}</td>
+                    <td>${count}</td>
+                    <td>${rejected}</td>
+                    <td><span class="badge ${badgeClass}">${rate}%</span></td>
+                </tr>`;
             }
 
-            if (weeklyViewStates.showingDetails) {
-                // Currently showing details, so switch back to summary
-                weeklyViewStates.showingDetails = false;
-                
-                const weekData = {
-                    qa: statsData.qa.weekly[selectedWeek],
-                    web: statsData.web.weekly[selectedWeek],
-                    app: statsData.app.weekly[selectedWeek],
-                    pm: statsData.pm.por_semana[selectedWeek]
-                };
+            html += '</tbody></table></div>';
 
-                let html = '<div class="stats-grid">';
-                
-                // QA Stats
-                html += '<div class="stat-card">';
-                html += '<div class="stat-icon">👥</div>';
-                html += '<div class="stat-label">Total Cards</div>';
-                html += '<div class="stat-value">' + weekData.qa.total_semana + '</div>';
-                html += '<div class="stat-change negative">';
-                html += weekData.qa.total_rechazadas_semana + ' rejected';
-                html += '</div>';
-                html += '</div>';
-
-                // Web Stats
-                html += '<div class="stat-card">';
-                html += '<div class="stat-icon">🌐</div>';
-                html += '<div class="stat-label">Web Performance</div>';
-                html += '<div class="stat-value">' + weekData.web.revisadas + '</div>';
-                html += '<div class="progress-bar" style="margin-top: 1rem;">';
-                html += '<div class="progress-fill" style="width: ' + (100 - weekData.web.porcentaje_rechazo) + '%"></div>';
-                html += '</div>';
-                html += '<div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.875rem;">';
-                html += '<span style="color: var(--success);">✓ ' + weekData.web.aceptadas + '</span>';
-                html += '<span style="color: var(--danger);">✗ ' + weekData.web.rechazadas + '</span>';
-                html += '</div>';
-                html += '</div>';
-
-                // App Stats
-                html += '<div class="stat-card">';
-                html += '<div class="stat-icon">📱</div>';
-                html += '<div class="stat-label">App Performance</div>';
-                html += '<div class="stat-value">' + weekData.app.revisadas + '</div>';
-                html += '<div class="progress-bar" style="margin-top: 1rem;">';
-                html += '<div class="progress-fill" style="width: ' + (100 - weekData.app.porcentaje_rechazo) + '%"></div>';
-                html += '</div>';
-                html += '<div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.875rem;">';
-                html += '<span style="color: var(--success);">✓ ' + weekData.app.aceptadas + '</span>';
-                html += '<span style="color: var(--danger);">✗ ' + weekData.app.rechazadas + '</span>';
-                html += '</div>';
-                html += '</div>';
-
-                // Priority Stats
-                html += '<div class="stat-card">';
-                html += '<div class="stat-icon">📊</div>';
-                html += '<div class="stat-label">Priority Distribution</div>';
-                html += '<div style="margin-top: 1rem;">';
-                html += '<div class="metric-card">';
-                html += '<div class="metric-label">🔴 High Priority</div>';
-                html += '<div class="metric-value">' + weekData.pm.alta + '</div>';
-                html += '</div>';
-                html += '<div class="metric-card">';
-                html += '<div class="metric-label">🟡 Medium Priority</div>';
-                html += '<div class="metric-value">' + weekData.pm.media + '</div>';
-                html += '</div>';
-                html += '<div class="metric-card">';
-                html += '<div class="metric-label">🟢 Low Priority</div>';
-                html += '<div class="metric-value">' + weekData.pm.baja + '</div>';
-                html += '</div>';
-                html += '</div>';
-                html += '</div>';
-                
-                html += '</div>';
-
-                // QA Performance Table
-                html += '<div class="table-container" style="margin-top: 2rem;">';
-                html += '<h3 style="padding: 1rem; font-size: 1.25rem;">QA Performance This Week</h3>';
-                html += '<table><thead><tr><th>QA/PM</th><th>Cards Reviewed</th><th>Cards Rejected</th><th>Rejection Rate</th></tr></thead><tbody>';
-
-                for (const [qa, count] of Object.entries(weekData.qa.tarjetas_por_qa)) {
-                    const rejected = weekData.qa.rechazadas_por_qa[qa] || 0;
-                    const rate = count > 0 ? (rejected / count * 100).toFixed(1) : 0;
-                    const badgeClass = rate > 20 ? 'badge-danger' : rate > 10 ? 'badge-warning' : 'badge-success';
-                    html += `<tr>
-                        <td>${qa}</td>
-                        <td>${count}</td>
-                        <td>${rejected}</td>
-                        <td><span class="badge ${badgeClass}">${rate}%</span></td>
-                    </tr>`;
-                }
-
-                html += '</tbody></table></div>';
-                weeklyContentDiv.innerHTML = html;
-            } else {
-                // Currently showing summary (or initial load), so switch to detailed cards
-                weeklyViewStates.showingDetails = true;
-                
-                const cards = statsData.cards_by_week[selectedWeek];
-
-                let html = `<h3>Tarjetas de la semana: ${selectedWeek}</h3>`;
-                html += '<div class="table-container"><table><thead><tr><th>Descripción</th><th>Estado</th></tr></thead><tbody>';
-
-                if (cards.length === 0) {
-                    html += '<tr><td colspan="2" style="text-align: center;">No cards found for this week.</td></tr>';
-                } else {
-                    for (const card of cards) {
-                        const badgeClass = card['Aceptado/Rechazado'] === 'RECHAZADO'
-                            ? 'badge-danger'
-                            : card['Aceptado/Rechazado'] === 'APROBADO'
-                            ? 'badge-success'
-                            : 'badge-warning'; // Default for PENDIENTE or other statuses
-
-                        const description = card['Descripción'] || 'No Description Available'; 
-
-                        html += `<tr>
-                                    <td>${description}</td>
-                                    <td><span class="badge ${badgeClass}">${card['Aceptado/Rechazado']}</span></td>
-                                </tr>`;
-                    }
-                }
-                html += '</tbody></table></div>';
-                weeklyContentDiv.innerHTML = html;
-            }
-            weeklyViewStates.lastClickedWeek = selectedWeek; // Update the last clicked week
+            document.getElementById('weeklyContent').innerHTML = html;
         }
-
 
         // Update charts when theme changes
         function updateCharts() {
@@ -2610,9 +2466,6 @@ class ComprehensiveQADashboard:
             // Initialize weekly view
             if (statsData.weeks_list.length > 0) {
                 document.getElementById('weekSelector').value = statsData.weeks_list[statsData.weeks_list.length - 1];
-                // Manually call updateWeeklyView to ensure it starts in summary mode on first load
-                // (as showTab('weekly') will call it, but we need to ensure the state is correctly set)
-                weeklyViewStates.showingDetails = false; // Ensure it starts in summary mode
                 updateWeeklyView();
             }
 
@@ -2624,14 +2477,6 @@ class ComprehensiveQADashboard:
                 card.addEventListener('mouseleave', function() {
                     this.style.transform = 'translateY(0) scale(1)';
                 });
-            });
-
-             // Add double-click listener to the weekSelector dropdown
-             // This event listener will trigger the toggle logic in updateWeeklyView
-             document.getElementById('weekSelector').addEventListener('dblclick', function(event) {
-                // Prevent the default behavior if the dblclick is on the select element itself
-                // event.preventDefault(); // Might not be needed, but useful if weird behavior occurs
-                updateWeeklyView(); 
             });
         });
 
@@ -2670,6 +2515,51 @@ class ComprehensiveQADashboard:
             print(f"Error al guardar o abrir el dashboard: {e}")
 
 if __name__ == "__main__":
-    print("The Python script has been updated to fix the weekly tab and developer double-click issues.")
+    # The tkinter and shutil parts are commented out as they are not directly
+    # runnable in this environment and were causing import errors.
+    # The core logic of the dashboard class remains functional.
+    # import tkinter as tk
+    # from tkinter import filedialog, messagebox
+    # import shutil
+
+    # root = tk.Tk()
+    # root.withdraw()
+
+    # file_path = filedialog.askopenfilename(
+    #     title="Select the new Excel file",
+    #     filetypes=[("Excel files", "*.xlsx")]
+    # )
+
+    # if not file_path:
+    #     print("❌ No file selected. Exiting.")
+    #     exit()
+
+    # try:
+    #     # Replace the old Excel file
+    #     shutil.copy(file_path, 'reporte_tarjetas.xlsx')
+    #     print("✅ Excel file replaced.")
+
+    #     # Generate dashboard
+    #     dashboard = ComprehensiveQADashboard()
+    #     dashboard.save_dashboard(filename="qa-dashboard.html")
+    #     messagebox.showinfo("Dashboard Updated", "Dashboard generated and opened successfully!")
+
+    # except Exception as e:
+    #     messagebox.showerror("Error", f"Something went wrong:\n{e}")
+
+    # import shutil
+
+    # # Ruta completa del archivo generado
+    # source = 'qa-dashboard.html'
+
+    # # Ruta donde está la carpeta `public/` de tu React app
+    # destination = '/Users/manuelpenamorros/Desktop/DASHTVA/public/qa-dashboard.html'
+
+    # try:
+    #     shutil.move(source, destination)
+    #     print("✅ ¡Archivo movido correctamente a la carpeta public de React!")
+    # except Exception as e:
+    #     print(f"❌ Error al mover el archivo: {e}")
+    print("The Python script has been updated to include 'Tester' in the QA section.")
     print("Please note: The parts of the script that interact with the local file system (tkinter and shutil) have been commented out for compatibility with this environment.")
     print("You can copy this code and run it in your local Python environment with the required Excel file.")
