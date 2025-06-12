@@ -87,7 +87,8 @@ class ComprehensiveQADashboard:
             'Web/App': ['web/app', 'web o app'],
             'Sitio': ['sitio'],
             'Plataforma': ['plataforma'],
-            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad']
+            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad'],
+            'Descripción': ['descripción', 'description'] # Ensure 'Descripción' is correctly mapped
         }
 
         for expected_col, variations in expected_cols_mapping.items():
@@ -254,12 +255,16 @@ class ComprehensiveQADashboard:
                 aceptadas_week = len(week_dev_data[week_dev_data['Aceptado/Rechazado'] == 'APROBADO'])
                 porcentaje_rechazo_week = round((rechazadas_week / total_week * 100) if total_week > 0 else 0, 2)
 
+                # Get detailed cards for the week and developer
+                cards_for_week_dev = week_dev_data[['Descripción', 'Aceptado/Rechazado']].fillna("Desconocido").to_dict('records')
+
                 if total_week > 0:
                     weekly_summary[semana] = {
                         'total_tarjetas': total_week,
                         'rechazadas': rechazadas_week,
                         'aceptadas': aceptadas_week,
-                        'porcentaje_rechazo': porcentaje_rechazo_week
+                        'porcentaje_rechazo': porcentaje_rechazo_week,
+                        'cards': cards_for_week_dev
                     }
             dev_weekly_details[dev] = weekly_summary
 
@@ -393,6 +398,18 @@ class ComprehensiveQADashboard:
 
         return cleaned_counts
 
+    def get_cards_by_week(self, week):
+        """Devuelve las tarjetas detalladas (descripción y estado) por semana"""
+        week_data = self.all_data[self.all_data['Semana'] == week]
+        # Ensure 'Descripción' column exists, otherwise handle it
+        if 'Descripción' not in week_data.columns:
+            print(f"Warning: 'Descripción' column not found in data for week {week}. Cards will not show descriptions.")
+            # Return only the status if description is missing
+            cards = week_data[['Aceptado/Rechazado']].fillna("Desconocido").to_dict('records')
+        else:
+            cards = week_data[['Descripción', 'Aceptado/Rechazado']].fillna("Desconocido").to_dict('records')
+        return cards
+
     def generate_all_statistics(self):
         """Genera TODAS las estadísticas solicitadas"""
         print("Generando estadísticas completas...")
@@ -413,6 +430,10 @@ class ComprehensiveQADashboard:
             'platforms': self.get_platform_report(),
             'weeks_list': self.weeks_list,
             'total_weeks': len(self.weeks_list)
+        }
+
+        stats['cards_by_week'] = {
+            week: self.get_cards_by_week(week) for week in self.weeks_list
         }
 
         return stats
@@ -1803,554 +1824,626 @@ class ComprehensiveQADashboard:
     </div>
 
     <script>
-        // Global data
-        const statsData = """ + json.dumps(stats) + """;
+    // Global data
+    const statsData = """ + json.dumps(stats) + """;
 
-        // Theme toggle
-        function toggleTheme() {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
-            document.querySelector('.theme-toggle').textContent = newTheme === 'dark' ? '☀️' : '🌙';
-            updateCharts();
+    // Theme toggle
+    function toggleTheme() {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        document.querySelector('.theme-toggle').textContent = newTheme === 'dark' ? '☀️' : '🌙';
+        updateCharts();
+    }
+
+    // Initialize theme
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    document.querySelector('.theme-toggle').textContent = savedTheme === 'dark' ? '☀️' : '🌙';
+
+    // Chart configurations
+    const plotlyConfig = { 
+        displayModeBar: false,
+        responsive: true 
+    };
+
+    const plotlyLayout = {
+        font: {
+            family: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+            size: 12
+        },
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+        margin: { t: 40, b: 60, l: 60, r: 30 },
+        hovermode: 'closest',
+        xaxis: {
+            showgrid: false,
+            zeroline: false,
+            linecolor: 'rgba(0,0,0,0.1)',
+            tickfont: { size: 11 }
+        },
+        yaxis: {
+            showgrid: true,
+            gridcolor: 'rgba(0,0,0,0.05)',
+            zeroline: false,
+            linecolor: 'rgba(0,0,0,0.1)',
+            tickfont: { size: 11 }
+        },
+        hoverlabel: {
+            bgcolor: '#1e293b',
+            bordercolor: '#e2e8f0',
+            font: { color: '#fff' }
+        }
+    };
+
+    // Tab switching
+    function showTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+        });
+
+        // Remove active class from all buttons
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+
+        // Show selected tab
+        document.getElementById(tabName).classList.add('active');
+
+        // Activate corresponding button
+        const activeButton = Array.from(document.querySelectorAll('.tab-button')).find(btn => 
+            btn.textContent.toLowerCase().includes(tabName.toLowerCase()) ||
+            (tabName === 'overview' && btn.textContent.includes('Overview')) ||
+            (tabName === 'devs' && btn.textContent.includes('Developers'))
+        );
+        if (activeButton) {
+            activeButton.classList.add('active');
         }
 
-        // Initialize theme
-        const savedTheme = localStorage.getItem('theme') || 'light';
-        document.documentElement.setAttribute('data-theme', savedTheme);
-        document.querySelector('.theme-toggle').textContent = savedTheme === 'dark' ? '☀️' : '🌙';
+        // Load charts for the tab
+        setTimeout(() => {
+            switch(tabName) {
+                case 'overview':
+                    loadOverviewCharts();
+                    break;
+                case 'qa':
+                    loadQACharts();
+                    break;
+                case 'web':
+                    loadWebCharts();
+                    break;
+                case 'app':
+                    loadAppCharts();
+                    break;
+                case 'devs':
+                    loadDevCharts();
+                    // Hide any previously shown developer details when switching to the main 'devs' tab
+                    document.getElementById('devWebDetails').style.display = 'none';
+                    document.getElementById('devAppDetails').style.display = 'none';
+                    break;
+                case 'pm':
+                    loadPMCharts();
+                    break;
+                case 'sites':
+                    loadSiteCharts();
+                    break;
+                case 'weekly':
+                    // Initialize or update weekly view
+                    updateWeeklyView();
+                    break;
+            }
+        }, 100);
+    }
 
-        // Chart configurations
-        const plotlyConfig = { 
-            displayModeBar: false,
-            responsive: true 
-        };
+    // Overview Charts
+    function loadOverviewCharts() {
+        const weeks = statsData.weeks_list.map(w => w.replace('tarjetas semana ', ''));
+        const webData = Object.values(statsData.web.weekly);
+        const appData = Object.values(statsData.app.weekly);
 
-        const plotlyLayout = {
-            font: {
-                family: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
-                size: 12
+        const overviewTraces = [
+            {
+                x: weeks,
+                y: webData.map(d => d.revisadas),
+                name: 'Web Cards',
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#6366f1', width: 3, shape: 'spline' },
+                marker: { size: 8 },
+                fill: 'tonexty',
+                fillcolor: 'rgba(99, 102, 241, 0.1)'
             },
-            paper_bgcolor: 'transparent',
-            plot_bgcolor: 'transparent',
-            margin: { t: 40, b: 60, l: 60, r: 30 },
-            hovermode: 'closest',
-            xaxis: {
-                showgrid: false,
-                zeroline: false,
-                linecolor: 'rgba(0,0,0,0.1)',
-                tickfont: { size: 11 }
-            },
-            yaxis: {
-                showgrid: true,
-                gridcolor: 'rgba(0,0,0,0.05)',
-                zeroline: false,
-                linecolor: 'rgba(0,0,0,0.1)',
-                tickfont: { size: 11 }
-            },
-            hoverlabel: {
-                bgcolor: '#1e293b',
-                bordercolor: '#e2e8f0',
-                font: { color: '#fff' }
+            {
+                x: weeks,
+                y: appData.map(d => d.revisadas),
+                name: 'App Cards',
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#ec4899', width: 3, shape: 'spline' },
+                marker: { size: 8 }
+            }
+        ];
+
+        const overviewLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
+            yaxis: { ...plotlyLayout.yaxis, title: 'Cards Reviewed' },
+            showlegend: true,
+            legend: {
+                orientation: 'h',
+                x: 0.5,
+                xanchor: 'center',
+                y: -0.2
             }
         };
 
-        // Tab switching
-        function showTab(tabName) {
-            // Hide all tabs
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
+        Plotly.newPlot('overviewChart', overviewTraces, overviewLayout, plotlyConfig);
 
-            // Remove active class from all buttons
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
+        // Platform Distribution Chart
+        const platformData = [{
+            labels: Object.keys(statsData.platforms),
+            values: Object.values(statsData.platforms),
+            type: 'pie',
+            hole: 0.6,
+            textposition: 'outside',
+            textinfo: 'label+percent',
+            marker: {
+                colors: ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', 
+                         '#ef4444', '#3b82f6', '#a855f7', '#f97316', '#14b8a6'],
+                line: { color: '#fff', width: 2 }
+            },
+            hoverinfo: 'label+value+percent'
+        }];
 
-            // Show selected tab
-            document.getElementById(tabName).classList.add('active');
+        const platformLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            showlegend: false,
+            annotations: [{
+                text: 'Platforms',
+                x: 0.5,
+                y: 0.5,
+                font: { size: 20, weight: 'bold' },
+                showarrow: false
+            }]
+        };
 
-            // Activate corresponding button
-            const activeButton = Array.from(document.querySelectorAll('.tab-button')).find(btn => 
-                btn.textContent.toLowerCase().includes(tabName.toLowerCase()) ||
-                (tabName === 'overview' && btn.textContent.includes('Overview')) ||
-                (tabName === 'devs' && btn.textContent.includes('Developers'))
-            );
-            if (activeButton) {
-                activeButton.classList.add('active');
-            }
+        Plotly.newPlot('platformChart', platformData, platformLayout, plotlyConfig);
+    }
 
-            // Load charts for the tab
-            setTimeout(() => {
-                switch(tabName) {
-                    case 'overview':
-                        loadOverviewCharts();
-                        break;
-                    case 'qa':
-                        loadQACharts();
-                        break;
-                    case 'web':
-                        loadWebCharts();
-                        break;
-                    case 'app':
-                        loadAppCharts();
-                        break;
-                    case 'devs':
-                        loadDevCharts();
-                        break;
-                    case 'pm':
-                        loadPMCharts();
-                        break;
-                    case 'sites':
-                        loadSiteCharts();
-                        break;
-                    case 'weekly':
-                        updateWeeklyView();
-                        break;
+    // QA Charts
+    function loadQACharts() {
+        const qaNames = Object.keys(statsData.qa.historical.por_qa).slice(0, 10);
+        const qaReviewed = qaNames.map(qa => statsData.qa.historical.por_qa[qa].total_revisadas);
+        const qaRejected = qaNames.map(qa => statsData.qa.historical.por_qa[qa].total_rechazadas);
+
+        const qaTraces = [
+            {
+                x: qaNames,
+                y: qaReviewed,
+                name: 'Reviewed',
+                type: 'bar',
+                marker: { 
+                    color: '#6366f1',
+                    line: { color: '#4f46e5', width: 1 }
                 }
-            }, 100);
-        }
-
-        // Overview Charts
-        function loadOverviewCharts() {
-            const weeks = statsData.weeks_list.map(w => w.replace('tarjetas semana ', ''));
-            const webData = Object.values(statsData.web.weekly);
-            const appData = Object.values(statsData.app.weekly);
-
-            const overviewTraces = [
-                {
-                    x: weeks,
-                    y: webData.map(d => d.revisadas),
-                    name: 'Web Cards',
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    line: { color: '#6366f1', width: 3, shape: 'spline' },
-                    marker: { size: 8 },
-                    fill: 'tonexty',
-                    fillcolor: 'rgba(99, 102, 241, 0.1)'
-                },
-                {
-                    x: weeks,
-                    y: appData.map(d => d.revisadas),
-                    name: 'App Cards',
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    line: { color: '#ec4899', width: 3, shape: 'spline' },
-                    marker: { size: 8 }
-                }
-            ];
-
-            const overviewLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
-                yaxis: { ...plotlyLayout.yaxis, title: 'Cards Reviewed' },
-                showlegend: true,
-                legend: {
-                    orientation: 'h',
-                    x: 0.5,
-                    xanchor: 'center',
-                    y: -0.2
-                }
-            };
-
-            Plotly.newPlot('overviewChart', overviewTraces, overviewLayout, plotlyConfig);
-
-            // Platform Distribution Chart
-            const platformData = [{
-                labels: Object.keys(statsData.platforms),
-                values: Object.values(statsData.platforms),
-                type: 'pie',
-                hole: 0.6,
-                textposition: 'outside',
-                textinfo: 'label+percent',
-                marker: {
-                    colors: ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', 
-                             '#ef4444', '#3b82f6', '#a855f7', '#f97316', '#14b8a6'],
-                    line: { color: '#fff', width: 2 }
-                },
-                hoverinfo: 'label+value+percent'
-            }];
-
-            const platformLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                showlegend: false,
-                annotations: [{
-                    text: 'Platforms',
-                    x: 0.5,
-                    y: 0.5,
-                    font: { size: 20, weight: 'bold' },
-                    showarrow: false
-                }]
-            };
-
-            Plotly.newPlot('platformChart', platformData, platformLayout, plotlyConfig);
-        }
-
-        // QA Charts
-        function loadQACharts() {
-            const qaNames = Object.keys(statsData.qa.historical.por_qa).slice(0, 10);
-            const qaReviewed = qaNames.map(qa => statsData.qa.historical.por_qa[qa].total_revisadas);
-            const qaRejected = qaNames.map(qa => statsData.qa.historical.por_qa[qa].total_rechazadas);
-
-            const qaTraces = [
-                {
-                    x: qaNames,
-                    y: qaReviewed,
-                    name: 'Reviewed',
-                    type: 'bar',
-                    marker: { 
-                        color: '#6366f1',
-                        line: { color: '#4f46e5', width: 1 }
-                    }
-                },
-                {
-                    x: qaNames,
-                    y: qaRejected,
-                    name: 'Rejected',
-                    type: 'bar',
-                    marker: { 
-                        color: '#ef4444',
-                        line: { color: '#dc2626', width: 1 }
-                    }
-                }
-            ];
-
-            const qaLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                xaxis: { ...plotlyLayout.xaxis, title: 'QA/PM', tickangle: -45 },
-                yaxis: { ...plotlyLayout.yaxis, title: 'Number of Cards' },
-                barmode: 'group',
-                bargap: 0.2,
-                bargroupgap: 0.1
-            };
-
-            Plotly.newPlot('qaChart', qaTraces, qaLayout, plotlyConfig);
-        }
-
-        // Web Charts
-        function loadWebCharts() {
-            const weeks = Object.keys(statsData.web.weekly).map(w => w.replace('tarjetas semana ', ''));
-            const webData = Object.values(statsData.web.weekly);
-
-            const webTraces = [
-                {
-                    x: weeks,
-                    y: webData.map(d => d.porcentaje_rechazo),
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    name: 'Rejection Rate',
-                    line: { 
-                        color: '#6366f1', 
-                        width: 4,
-                        shape: 'spline'
-                    },
-                    marker: { 
-                        size: 10,
-                        color: '#6366f1',
-                        line: { color: '#fff', width: 2 }
-                    },
-                    fill: 'tozeroy',
-                    fillcolor: 'rgba(99, 102, 241, 0.1)'
-                }
-            ];
-
-            const webLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
-                yaxis: { 
-                    ...plotlyLayout.yaxis, 
-                    title: 'Rejection Rate (%)',
-                    range: [0, Math.max(...webData.map(d => d.porcentaje_rechazo)) * 1.2]
-                },
-                shapes: [{
-                    type: 'line',
-                    x0: 0,
-                    x1: 1,
-                    xref: 'paper',
-                    y0: statsData.web.historical.porcentaje_rechazo,
-                    y1: statsData.web.historical.porcentaje_rechazo,
-                    line: {
-                        color: '#ef4444',
-                        width: 2,
-                        dash: 'dash'
-                    }
-                }],
-                annotations: [{
-                    x: 0.98,
-                    y: statsData.web.historical.porcentaje_rechazo,
-                    xref: 'paper',
-                    text: 'Average: ' + statsData.web.historical.porcentaje_rechazo + '%',
-                    showarrow: false,
-                    bgcolor: '#ef4444',
-                    bordercolor: '#ef4444',
-                    font: { color: '#fff', size: 12 },
-                    borderpad: 4,
-                    borderwidth: 1,
-                    xanchor: 'right'
-                }]
-            };
-
-            Plotly.newPlot('webChart', webTraces, webLayout, plotlyConfig);
-        }
-
-        // App Charts
-        function loadAppCharts() {
-            const weeks = Object.keys(statsData.app.weekly).map(w => w.replace('tarjetas semana ', ''));
-            const appData = Object.values(statsData.app.weekly);
-
-            const appTraces = [
-                {
-                    x: weeks,
-                    y: appData.map(d => d.porcentaje_rechazo),
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    name: 'Rejection Rate',
-                    line: { 
-                        color: '#ec4899', 
-                        width: 4,
-                        shape: 'spline'
-                    },
-                    marker: { 
-                        size: 10,
-                        color: '#ec4899',
-                        line: { color: '#fff', width: 2 }
-                    },
-                    fill: 'tozeroy',
-                    fillcolor: 'rgba(236, 72, 153, 0.1)'
-                }
-            ];
-
-            const appLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
-                yaxis: { 
-                    ...plotlyLayout.yaxis, 
-                    title: 'Rejection Rate (%)',
-                    range: [0, Math.max(...appData.map(d => d.porcentaje_rechazo)) * 1.2]
-                },
-                shapes: [{
-                    type: 'line',
-                    x0: 0,
-                    x1: 1,
-                    xref: 'paper',
-                    y0: statsData.app.historical.porcentaje_rechazo,
-                    y1: statsData.app.historical.porcentaje_rechazo,
-                    line: {
-                        color: '#ef4444',
-                        width: 2,
-                        dash: 'dash'
-                    }
-                }],
-                annotations: [{
-                    x: 0.98,
-                    y: statsData.app.historical.porcentaje_rechazo,
-                    xref: 'paper',
-                    text: 'Average: ' + statsData.app.historical.porcentaje_rechazo + '%',
-                    showarrow: false,
-                    bgcolor: '#ef4444',
-                    bordercolor: '#ef4444',
-                    font: { color: '#fff', size: 12 },
-                    borderpad: 4,
-                    borderwidth: 1,
-                    xanchor: 'right'
-                }]
-            };
-
-            Plotly.newPlot('appChart', appTraces, appLayout, plotlyConfig);
-        }
-
-        // Developer Charts
-        function loadDevCharts() {
-            const top5Web = Object.entries(statsData.dev_web).slice(0, 5);
-            const top5App = Object.entries(statsData.dev_app).slice(0, 5);
-
-            const devTraces = [
-                {
-                    x: top5Web.map(([dev, data]) => dev),
-                    y: top5Web.map(([dev, data]) => data.total_tarjetas),
-                    name: 'Web - Total',
-                    type: 'bar',
-                    marker: { 
-                        color: '#6366f1',
-                        line: { color: '#4f46e5', width: 1 }
-                    }
-                },
-                {
-                    x: top5Web.map(([dev, data]) => dev),
-                    y: top5Web.map(([dev, data]) => data.rechazadas),
-                    name: 'Web - Rejected',
-                    type: 'bar',
-                    marker: { 
-                        color: 'rgba(99, 102, 241, 0.5)',
-                        line: { color: '#6366f1', width: 1 }
-                    }
-                },
-                {
-                    x: top5App.map(([dev, data]) => dev),
-                    y: top5App.map(([dev, data]) => data.total_tarjetas),
-                    name: 'App - Total',
-                    type: 'bar',
-                    marker: { 
-                        color: '#ec4899',
-                        line: { color: '#db2777', width: 1 }
-                    }
-                },
-                {
-                    x: top5App.map(([dev, data]) => dev),
-                    y: top5App.map(([dev, data]) => data.rechazadas),
-                    name: 'App - Rejected',
-                    type: 'bar',
-                    marker: { 
-                        color: 'rgba(236, 72, 153, 0.5)',
-                        line: { color: '#ec4899', width: 1 }
-                    }
-                }
-            ];
-
-            const devLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                xaxis: { ...plotlyLayout.xaxis, title: 'Developer', tickangle: -45 },
-                yaxis: { ...plotlyLayout.yaxis, title: 'Number of Cards' },
-                barmode: 'group',
-                height: 500
-            };
-
-            Plotly.newPlot('devChart', devTraces, devLayout, plotlyConfig);
-        }
-
-        // PM Charts
-        function loadPMCharts() {
-            const weeks = Object.keys(statsData.pm.por_semana).map(w => w.replace('tarjetas semana ', ''));
-            const pmData = Object.values(statsData.pm.por_semana);
-
-            const pmTraces = [
-                {
-                    x: weeks,
-                    y: pmData.map(d => d.alta),
-                    name: 'High Priority',
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    line: { color: '#ef4444', width: 3 },
-                    marker: { size: 8 },
-                    stackgroup: 'one'
-                },
-                {
-                    x: weeks,
-                    y: pmData.map(d => d.media),
-                    name: 'Medium Priority',
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    line: { color: '#f59e0b', width: 3 },
-                    marker: { size: 8 },
-                    stackgroup: 'one'
-                },
-                {
-                    x: weeks,
-                    y: pmData.map(d => d.baja),
-                    name: 'Low Priority',
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    line: { color: '#10b981', width: 3 },
-                    marker: { size: 8 },
-                    stackgroup: 'one'
-                }
-            ];
-
-            const pmLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
-                yaxis: { ...plotlyLayout.yaxis, title: 'Number of Cards' },
-                hovermode: 'x unified'
-            };
-
-            Plotly.newPlot('priorityChart', pmTraces, pmLayout, plotlyConfig);
-        }
-
-        // Site Charts
-        function loadSiteCharts() {
-            const top10Sites = Object.entries(statsData.sites).slice(0, 10);
-
-            const siteTraces = [{
-                labels: top10Sites.map(([site, data]) => site),
-                values: top10Sites.map(([site, data]) => data.total),
-                type: 'pie',
-                hole: 0.4,
-                textposition: 'outside',
-                textinfo: 'label+percent',
-                marker: {
-                    colors: ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', 
-                             '#ef4444', '#3b82f6', '#a855f7', '#f97316', '#14b8a6'],
-                    line: { color: '#fff', width: 2 }
-                },
-                hoverinfo: 'label+value+percent'
-            }];
-
-            const siteLayout = {
-                ...plotlyLayout,
-                title: { text: '', font: { size: 16 } },
-                height: 500,
-                showlegend: true,
-                legend: {
-                    orientation: 'v',
-                    x: 1.1,
-                    xanchor: 'left',
-                    y: 0.5
-                }
-            };
-
-            Plotly.newPlot('siteChart', siteTraces, siteLayout, plotlyConfig);
-        }
-
-        // Developer Details
-        function showDevDetails(devName, devType) {
-            const weeklyData = devType === 'web' ? 
-                statsData.dev_web_weekly_details[devName] : 
-                statsData.dev_app_weekly_details[devName];
-            
-            const targetDiv = devType === 'web' ? 'devWebDetails' : 'devAppDetails';
-            
-            let html = `<h3>Weekly Performance: ${devName}</h3>`;
-            html += '<table style="width: 100%; margin-top: 1rem;">';
-            html += '<thead><tr><th>Week</th><th>Total Cards</th><th>Rejected</th><th>Accepted</th><th>Rejection Rate</th></tr></thead><tbody>';
-            
-            if (!weeklyData || Object.keys(weeklyData).length === 0) {
-                html += '<tr><td colspan="5" style="text-align: center;">No weekly data available</td></tr>';
-            } else {
-                for (const week of statsData.weeks_list) {
-                    const data = weeklyData[week];
-                    if (data) {
-                        const badgeClass = data.porcentaje_rechazo > 20 ? 'badge-danger' : 
-                                             data.porcentaje_rechazo > 10 ? 'badge-warning' : 'badge-success';
-                        html += `<tr>
-                            <td>${week.replace('tarjetas semana ', 'Week ')}</td>
-                            <td>${data.total_tarjetas}</td>
-                            <td>${data.rechazadas}</td>
-                            <td>${data.aceptadas}</td>
-                            <td><span class="badge ${badgeClass}">${data.porcentaje_rechazo}%</span></td>
-                        </tr>`;
-                    }
+            },
+            {
+                x: qaNames,
+                y: qaRejected,
+                name: 'Rejected',
+                type: 'bar',
+                marker: { 
+                    color: '#ef4444',
+                    line: { color: '#dc2626', width: 1 }
                 }
             }
-            
-            html += '</tbody></table>';
-            
-            const detailsDiv = document.getElementById(targetDiv);
-            detailsDiv.innerHTML = html;
-            detailsDiv.style.display = 'block';
-            detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        ];
+
+        const qaLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            xaxis: { ...plotlyLayout.xaxis, title: 'QA/PM', tickangle: -45 },
+            yaxis: { ...plotlyLayout.yaxis, title: 'Number of Cards' },
+            barmode: 'group',
+            bargap: 0.2,
+            bargroupgap: 0.1
+        };
+
+        Plotly.newPlot('qaChart', qaTraces, qaLayout, plotlyConfig);
+    }
+
+    // Web Charts
+    function loadWebCharts() {
+        const weeks = Object.keys(statsData.web.weekly).map(w => w.replace('tarjetas semana ', ''));
+        const webData = Object.values(statsData.web.weekly);
+
+        const webTraces = [
+            {
+                x: weeks,
+                y: webData.map(d => d.porcentaje_rechazo),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Rejection Rate',
+                line: { 
+                    color: '#6366f1', 
+                    width: 4,
+                    shape: 'spline'
+                },
+                marker: { 
+                    size: 10,
+                    color: '#6366f1',
+                    line: { color: '#fff', width: 2 }
+                },
+                fill: 'tozeroy',
+                fillcolor: 'rgba(99, 102, 241, 0.1)'
+            }
+        ];
+
+        const webLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
+            yaxis: { 
+                ...plotlyLayout.yaxis, 
+                title: 'Rejection Rate (%)',
+                range: [0, Math.max(...webData.map(d => d.porcentaje_rechazo)) * 1.2]
+            },
+            shapes: [{
+                type: 'line',
+                x0: 0,
+                x1: 1,
+                xref: 'paper',
+                y0: statsData.web.historical.porcentaje_rechazo,
+                y1: statsData.web.historical.porcentaje_rechazo,
+                line: {
+                    color: '#ef4444',
+                    width: 2,
+                    dash: 'dash'
+                }
+            }],
+            annotations: [{
+                x: 0.98,
+                y: statsData.web.historical.porcentaje_rechazo,
+                xref: 'paper',
+                text: 'Average: ' + statsData.web.historical.porcentaje_rechazo + '%',
+                showarrow: false,
+                bgcolor: '#ef4444',
+                bordercolor: '#ef4444',
+                font: { color: '#fff', size: 12 },
+                borderpad: 4,
+                borderwidth: 1,
+                xanchor: 'right'
+            }]
+        };
+
+        Plotly.newPlot('webChart', webTraces, webLayout, plotlyConfig);
+    }
+
+    // App Charts
+    function loadAppCharts() {
+        const weeks = Object.keys(statsData.app.weekly).map(w => w.replace('tarjetas semana ', ''));
+        const appData = Object.values(statsData.app.weekly);
+
+        const appTraces = [
+            {
+                x: weeks,
+                y: appData.map(d => d.porcentaje_rechazo),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Rejection Rate',
+                line: { 
+                    color: '#ec4899', 
+                    width: 4,
+                    shape: 'spline'
+                },
+                marker: { 
+                    size: 10,
+                    color: '#ec4899',
+                    line: { color: '#fff', width: 2 }
+                },
+                fill: 'tozeroy',
+                fillcolor: 'rgba(236, 72, 153, 0.1)'
+            }
+        ];
+
+        const appLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
+            yaxis: { 
+                ...plotlyLayout.yaxis, 
+                title: 'Rejection Rate (%)',
+                range: [0, Math.max(...appData.map(d => d.porcentaje_rechazo)) * 1.2]
+            },
+            shapes: [{
+                type: 'line',
+                x0: 0,
+                x1: 1,
+                xref: 'paper',
+                y0: statsData.app.historical.porcentaje_rechazo,
+                y1: statsData.app.historical.porcentaje_rechazo,
+                line: {
+                    color: '#ef4444',
+                    width: 2,
+                    dash: 'dash'
+                }
+            }],
+            annotations: [{
+                x: 0.98,
+                y: statsData.app.historical.porcentaje_rechazo,
+                xref: 'paper',
+                text: 'Average: ' + statsData.app.historical.porcentaje_rechazo + '%',
+                showarrow: false,
+                bgcolor: '#ef4444',
+                bordercolor: '#ef4444',
+                font: { color: '#fff', size: 12 },
+                borderpad: 4,
+                borderwidth: 1,
+                xanchor: 'right'
+            }]
+        };
+
+        Plotly.newPlot('appChart', appTraces, appLayout, plotlyConfig);
+    }
+
+    // Developer Charts
+    function loadDevCharts() {
+        const top5Web = Object.entries(statsData.dev_web).slice(0, 5);
+        const top5App = Object.entries(statsData.dev_app).slice(0, 5);
+
+        const devTraces = [
+            {
+                x: top5Web.map(([dev, data]) => dev),
+                y: top5Web.map(([dev, data]) => data.total_tarjetas),
+                name: 'Web - Total',
+                type: 'bar',
+                marker: { 
+                    color: '#6366f1',
+                    line: { color: '#4f46e5', width: 1 }
+                }
+            },
+            {
+                x: top5Web.map(([dev, data]) => dev),
+                y: top5Web.map(([dev, data]) => data.rechazadas),
+                name: 'Web - Rejected',
+                type: 'bar',
+                marker: { 
+                    color: 'rgba(99, 102, 241, 0.5)',
+                    line: { color: '#6366f1', width: 1 }
+                }
+            },
+            {
+                x: top5App.map(([dev, data]) => dev),
+                y: top5App.map(([dev, data]) => data.total_tarjetas),
+                name: 'App - Total',
+                type: 'bar',
+                marker: { 
+                    color: '#ec4899',
+                    line: { color: '#db2777', width: 1 }
+                }
+            },
+            {
+                x: top5App.map(([dev, data]) => dev),
+                y: top5App.map(([dev, data]) => data.rechazadas),
+                name: 'App - Rejected',
+                type: 'bar',
+                marker: { 
+                    color: 'rgba(236, 72, 153, 0.5)',
+                    line: { color: '#ec4899', width: 1 }
+                }
+            }
+        ];
+
+        const devLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            xaxis: { ...plotlyLayout.xaxis, title: 'Developer', tickangle: -45 },
+            yaxis: { ...plotlyLayout.yaxis, title: 'Number of Cards' },
+            barmode: 'group',
+            height: 500
+        };
+
+        Plotly.newPlot('devChart', devTraces, devLayout, plotlyConfig);
+    }
+
+    // PM Charts
+    function loadPMCharts() {
+        const weeks = Object.keys(statsData.pm.por_semana).map(w => w.replace('tarjetas semana ', ''));
+        const pmData = Object.values(statsData.pm.por_semana);
+
+        const pmTraces = [
+            {
+                x: weeks,
+                y: pmData.map(d => d.alta),
+                name: 'High Priority',
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#ef4444', width: 3 },
+                marker: { size: 8 },
+                stackgroup: 'one'
+            },
+            {
+                x: weeks,
+                y: pmData.map(d => d.media),
+                name: 'Medium Priority',
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#f59e0b', width: 3 },
+                marker: { size: 8 },
+                stackgroup: 'one'
+            },
+            {
+                x: weeks,
+                y: pmData.map(d => d.baja),
+                name: 'Low Priority',
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#10b981', width: 3 },
+                marker: { size: 8 },
+                stackgroup: 'one'
+            }
+        ];
+
+        const pmLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            xaxis: { ...plotlyLayout.xaxis, title: 'Week' },
+            yaxis: { ...plotlyLayout.yaxis, title: 'Number of Cards' },
+            hovermode: 'x unified'
+        };
+
+        Plotly.newPlot('priorityChart', pmTraces, pmLayout, plotlyConfig);
+    }
+
+    // Site Charts
+    function loadSiteCharts() {
+        const top10Sites = Object.entries(statsData.sites).slice(0, 10);
+
+        const siteTraces = [{
+            labels: top10Sites.map(([site, data]) => site),
+            values: top10Sites.map(([site, data]) => data.total),
+            type: 'pie',
+            hole: 0.4,
+            textposition: 'outside',
+            textinfo: 'label+percent',
+            marker: {
+                colors: ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', 
+                         '#ef4444', '#3b82f6', '#a855f7', '#f97316', '#14b8a6'],
+                line: { color: '#fff', width: 2 }
+            },
+            hoverinfo: 'label+value+percent'
+        }];
+
+        const siteLayout = {
+            ...plotlyLayout,
+            title: { text: '', font: { size: 16 } },
+            height: 500,
+            showlegend: true,
+            legend: {
+                orientation: 'v',
+                x: 1.1,
+                xanchor: 'left',
+                y: 0.5
+            }
+        };
+
+        Plotly.newPlot('siteChart', siteTraces, siteLayout, plotlyConfig);
+    }
+
+    // Developer Details View Management
+    // This function now exclusively shows the weekly summary for a developer.
+    // Double-clicking a specific week *within this summary* will show detailed cards.
+    function showDevDetails(devName, devType) {
+        const detailsDivId = devType === 'web' ? 'devWebDetails' : 'devAppDetails';
+        const detailsDiv = document.getElementById(detailsDivId);
+
+        const weeklyData = devType === 'web' ? 
+            statsData.dev_web_weekly_details[devName] : 
+            statsData.dev_app_weekly_details[devName];
+        
+        let html = `<h3>Weekly Performance: ${devName}</h3>`;
+        html += '<table style="width: 100%; margin-top: 1rem;">';
+        html += '<thead><tr><th>Week</th><th>Total Cards</th><th>Rejected</th><th>Accepted</th><th>Rejection Rate</th></tr></thead><tbody>';
+        
+        if (!weeklyData || Object.keys(weeklyData).length === 0) {
+            html += '<tr><td colspan="5" style="text-align: center;">No weekly data available</td></tr>';
+        } else {
+            // Sort weeks to display most recent first
+            const sortedWeeks = Object.keys(weeklyData).sort((a, b) => {
+                const weekA = a.match(/(\d+)mar-(\d+)mar|(\d+)abr-(\d+)abr|(\d+)mayo-(\d+)mayo/i); // More robust regex for week parsing
+                const weekB = b.match(/(\d+)mar-(\d+)mar|(\d+)abr-(\d+)abr|(\d+)mayo-(\d+)mayo/i);
+
+                if (!weekA || !weekB) return 0; // Handle cases where week format is unexpected
+
+                // Example: "tarjetas semana 18mar-21mar" -> parse as dates if possible
+                // For simplicity and matching your data format, let's assume direct string comparison works if weeks are formatted consistently for sorting, or convert to sortable dates.
+                // For now, reverse the order to show most recent first, assuming the list `statsData.weeks_list` is ordered oldest to newest.
+                return statsData.weeks_list.indexOf(b) - statsData.weeks_list.indexOf(a);
+
+            });
+
+            for (const week of sortedWeeks) {
+                const data = weeklyData[week];
+                if (data) {
+                    const badgeClass = data.porcentaje_rechazo > 20 ? 'badge-danger' : 
+                                       data.porcentaje_rechazo > 10 ? 'badge-warning' : 'badge-success';
+                    // Added ondblclick to the row to show detailed cards for that specific week
+                    html += `<tr style="cursor: pointer;" ondblclick="showDevWeeklyCardsForWeek('${devName}', '${devType}', '${week}')">
+                                <td>${week.replace('tarjetas semana ', 'Week ')}</td>
+                                <td>${data.total_tarjetas}</td>
+                                <td>${data.rechazadas}</td>
+                                <td>${data.aceptadas}</td>
+                                <td><span class="badge ${badgeClass}">${data.porcentaje_rechazo}%</span></td>
+                            </tr>`;
+                }
+            }
+        }
+        
+        html += '</tbody></table>';
+        html += '<div id="devDetailedCardsForWeek" class="info-box" style="display: none; margin-top: 2rem;"></div>'; // Container for detailed cards
+
+        detailsDiv.innerHTML = html;
+        detailsDiv.style.display = 'block';
+        detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // NEW FUNCTION: Displays detailed cards for a specific developer and week
+    function showDevWeeklyCardsForWeek(devName, devType, selectedWeek) {
+        const devWeeklyData = devType === 'web' ? statsData.dev_web_weekly_details[devName] : statsData.dev_app_weekly_details[devName];
+        const cards = devWeeklyData[selectedWeek] ? devWeeklyData[selectedWeek].cards : [];
+        const detailedCardsDiv = document.getElementById('devDetailedCardsForWeek');
+
+        let cardsHtml = `<h3>Cards for ${devName} - ${selectedWeek.replace('tarjetas semana ', 'Week ')}</h3>`;
+        cardsHtml += '<div class="table-container" style="margin-top: 1rem;"><table><thead><tr><th>Descripción</th><th>Estado</th></tr></thead><tbody>';
+
+        if (cards.length === 0) {
+            cardsHtml += '<tr><td colspan="2" style="text-align: center;">No cards found for this week.</td></tr>';
+        } else {
+            for (const card of cards) {
+                const badgeClass = card['Aceptado/Rechazado'] === 'RECHAZADO'
+                    ? 'badge-danger'
+                    : card['Aceptado/Rechazado'] === 'APROBADO'
+                    ? 'badge-success'
+                    : 'badge-warning'; // Default for PENDIENTE or other statuses
+
+                const description = card['Descripción'] || 'No Description Available'; 
+                cardsHtml += `<tr>
+                                    <td>${description}</td>
+                                    <td><span class="badge ${badgeClass}">${card['Aceptado/Rechazado']}</span></td>
+                                </tr>`;
+            }
+        }
+        cardsHtml += '</tbody></table></div>';
+        
+        detailedCardsDiv.innerHTML = cardsHtml;
+        detailedCardsDiv.style.display = 'block';
+        detailedCardsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // Weekly View State management (for the 'Weekly' tab)
+    const weeklyViewStates = {
+        lastSelectedWeekInDropdown: null, // Tracks the last week chosen in the dropdown
+        showingDetailedCardsForWeeklyTab: false // true if detailed cards are shown in 'Weekly' tab, false for summary
+    };
+
+    function updateWeeklyView() {
+        const selectedWeek = document.getElementById('weekSelector').value;
+        const weeklyContentDiv = document.getElementById('weeklyContent');
+
+        // If the selected week changes in the dropdown, always go back to summary for the Weekly tab
+        if (selectedWeek !== weeklyViewStates.lastSelectedWeekInDropdown) {
+            weeklyViewStates.showingDetailedCardsForWeeklyTab = false; // Reset to summary mode
+            weeklyViewStates.lastSelectedWeekInDropdown = selectedWeek;
         }
 
-        // Weekly View
-        function updateWeeklyView() {
-            const selectedWeek = document.getElementById('weekSelector').value;
+        // Now, this logic controls what happens when the dropdown *changes*
+        // and also when the dropdown is *double-clicked*.
+        if (!weeklyViewStates.showingDetailedCardsForWeeklyTab) {
+            // Show summary if not already showing detailed cards, or if week changed
             const weekData = {
                 qa: statsData.qa.weekly[selectedWeek],
                 web: statsData.web.weekly[selectedWeek],
@@ -2430,68 +2523,133 @@ class ComprehensiveQADashboard:
                 const rate = count > 0 ? (rejected / count * 100).toFixed(1) : 0;
                 const badgeClass = rate > 20 ? 'badge-danger' : rate > 10 ? 'badge-warning' : 'badge-success';
                 html += `<tr>
-                    <td>${qa}</td>
-                    <td>${count}</td>
-                    <td>${rejected}</td>
-                    <td><span class="badge ${badgeClass}">${rate}%</span></td>
-                </tr>`;
+                            <td>${qa}</td>
+                            <td>${count}</td>
+                            <td>${rejected}</td>
+                            <td><span class="badge ${badgeClass}">${rate}%</span></td>
+                        </tr>`;
             }
 
             html += '</tbody></table></div>';
-
-            document.getElementById('weeklyContent').innerHTML = html;
+            weeklyContentDiv.innerHTML = html;
+        } else {
+            // If already showing detailed cards (due to a dblclick on dropdown or a previous dblclick),
+            // then toggle back to the summary view for the current week.
+            weeklyViewStates.showingDetailedCardsForWeeklyTab = false; // Set to false to show summary on next call
+            updateWeeklyView(); // Re-call to re-render summary for the same week
+            return; // Exit to prevent immediate re-display of details
         }
 
-        // Update charts when theme changes
-        function updateCharts() {
-            const currentTab = document.querySelector('.tab-content.active').id;
-            showTab(currentTab);
-        }
+        // Toggle detailed cards on double-click of the week selector in the 'Weekly' tab
+        // This is a direct toggle for the *selected* week in the dropdown.
+        const cards = statsData.cards_by_week[selectedWeek];
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
-            // Add smooth scrolling
-            document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-                anchor.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    document.querySelector(this.getAttribute('href')).scrollIntoView({
-                        behavior: 'smooth'
-                    });
-                });
-            });
+        let cardsHtml = `<h3>Detailed Cards for Week: ${selectedWeek.replace('tarjetas semana ', 'Week ')}</h3>`;
+        cardsHtml += '<div class="table-container"><table><thead><tr><th>Descripción</th><th>Estado</th></tr></thead><tbody>';
 
-            // Load initial charts
-            loadOverviewCharts();
+        if (cards && cards.length > 0) {
+            for (const card of cards) {
+                const badgeClass = card['Aceptado/Rechazado'] === 'RECHAZADO'
+                    ? 'badge-danger'
+                    : card['Aceptado/Rechazado'] === 'APROBADO'
+                    ? 'badge-success'
+                    : 'badge-warning'; // Default for PENDIENTE or other statuses
 
-            // Initialize weekly view
-            if (statsData.weeks_list.length > 0) {
-                document.getElementById('weekSelector').value = statsData.weeks_list[statsData.weeks_list.length - 1];
-                updateWeeklyView();
+                const description = card['Descripción'] || 'No Description Available'; 
+
+                cardsHtml += `<tr>
+                                    <td>${description}</td>
+                                    <td><span class="badge ${badgeClass}">${card['Aceptado/Rechazado']}</span></td>
+                                </tr>`;
             }
+        } else {
+            cardsHtml += '<tr><td colspan="2" style="text-align: center;">No cards found for this week.</td></tr>';
+        }
+        cardsHtml += '</tbody></table></div>';
 
-            // Add hover effects to cards
-            document.querySelectorAll('.stat-card').forEach(card => {
-                card.addEventListener('mouseenter', function() {
-                    this.style.transform = 'translateY(-10px) scale(1.02)';
-                });
-                card.addEventListener('mouseleave', function() {
-                    this.style.transform = 'translateY(0) scale(1)';
+        // Append the detailed cards section after the summary section.
+        // This makes it so that when you double-click the week selector,
+        // it toggles between seeing the summary stats *and* the detailed cards,
+        // or just the summary stats.
+        const detailedWeeklyCardsContainer = document.createElement('div');
+        detailedWeeklyCardsContainer.id = 'detailedWeeklyCardsContainer';
+        detailedWeeklyCardsContainer.innerHTML = cardsHtml;
+        detailedWeeklyCardsContainer.style.marginTop = '2rem';
+        detailedWeeklyCardsContainer.style.display = weeklyViewStates.showingDetailedCardsForWeeklyTab ? 'block' : 'none';
+
+        // Clear previous detailed view if it exists, then append new one
+        const existingDetailed = weeklyContentDiv.querySelector('#detailedWeeklyCardsContainer');
+        if (existingDetailed) {
+            weeklyContentDiv.removeChild(existingDetailed);
+        }
+        if (weeklyViewStates.showingDetailedCardsForWeeklyTab) {
+            weeklyContentDiv.appendChild(detailedWeeklyCardsContainer);
+        }
+    }
+
+
+    // Update charts when theme changes
+    function updateCharts() {
+        const currentTab = document.querySelector('.tab-content.active').id;
+        showTab(currentTab);
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+        // Add smooth scrolling
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
                 });
             });
         });
 
-        // Resize handler for responsive charts
-        window.addEventListener('resize', function() {
-            const charts = ['overviewChart', 'platformChart', 'qaChart', 'webChart', 
-                            'appChart', 'devChart', 'priorityChart', 'siteChart'];
-            charts.forEach(chartId => {
-                const chartDiv = document.getElementById(chartId);
-                if (chartDiv && chartDiv.data) {
-                    Plotly.Plots.resize(chartId);
-                }
+        // Load initial charts
+        loadOverviewCharts();
+
+        // Initialize weekly view
+        if (statsData.weeks_list.length > 0) {
+            // Set the dropdown to the most recent week initially
+            document.getElementById('weekSelector').value = statsData.weeks_list[statsData.weeks_list.length - 1];
+            weeklyViewStates.lastSelectedWeekInDropdown = document.getElementById('weekSelector').value; // Initialize this too
+            weeklyViewStates.showingDetailedCardsForWeeklyTab = false; // Ensure it starts in summary mode
+            updateWeeklyView(); // Render the summary for the initial week
+        }
+
+        // Add double-click listener to the weekSelector dropdown itself for the 'Weekly' tab
+        document.getElementById('weekSelector').addEventListener('dblclick', function(event) {
+            // Toggle the state for showing detailed cards in the 'Weekly' tab
+            weeklyViewStates.showingDetailedCardsForWeeklyTab = !weeklyViewStates.showingDetailedCardsForWeeklyTab;
+            // Re-render the weekly view based on the new state
+            updateWeeklyView();
+        });
+
+
+        // Add hover effects to cards
+        document.querySelectorAll('.stat-card').forEach(card => {
+            card.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-10px) scale(1.02)';
+            });
+            card.addEventListener('mouseleave', function() {
+                this.style.transform = 'translateY(0) scale(1)';
             });
         });
-    </script>
+    });
+
+    // Resize handler for responsive charts
+    window.addEventListener('resize', function() {
+        const charts = ['overviewChart', 'platformChart', 'qaChart', 'webChart', 
+                        'appChart', 'devChart', 'priorityChart', 'siteChart'];
+        charts.forEach(chartId => {
+            const chartDiv = document.getElementById(chartId);
+            if (chartDiv && chartDiv.data) {
+                Plotly.Plots.resize(chartId);
+            }
+        });
+    });
+</script>
 </body>
 </html>"""
 
@@ -2515,51 +2673,6 @@ class ComprehensiveQADashboard:
             print(f"Error al guardar o abrir el dashboard: {e}")
 
 if __name__ == "__main__":
-    # The tkinter and shutil parts are commented out as they are not directly
-    # runnable in this environment and were causing import errors.
-    # The core logic of the dashboard class remains functional.
-    # import tkinter as tk
-    # from tkinter import filedialog, messagebox
-    # import shutil
-
-    # root = tk.Tk()
-    # root.withdraw()
-
-    # file_path = filedialog.askopenfilename(
-    #     title="Select the new Excel file",
-    #     filetypes=[("Excel files", "*.xlsx")]
-    # )
-
-    # if not file_path:
-    #     print("❌ No file selected. Exiting.")
-    #     exit()
-
-    # try:
-    #     # Replace the old Excel file
-    #     shutil.copy(file_path, 'reporte_tarjetas.xlsx')
-    #     print("✅ Excel file replaced.")
-
-    #     # Generate dashboard
-    #     dashboard = ComprehensiveQADashboard()
-    #     dashboard.save_dashboard(filename="qa-dashboard.html")
-    #     messagebox.showinfo("Dashboard Updated", "Dashboard generated and opened successfully!")
-
-    # except Exception as e:
-    #     messagebox.showerror("Error", f"Something went wrong:\n{e}")
-
-    # import shutil
-
-    # # Ruta completa del archivo generado
-    # source = 'qa-dashboard.html'
-
-    # # Ruta donde está la carpeta `public/` de tu React app
-    # destination = '/Users/manuelpenamorros/Desktop/DASHTVA/public/qa-dashboard.html'
-
-    # try:
-    #     shutil.move(source, destination)
-    #     print("✅ ¡Archivo movido correctamente a la carpeta public de React!")
-    # except Exception as e:
-    #     print(f"❌ Error al mover el archivo: {e}")
-    print("The Python script has been updated to include 'Tester' in the QA section.")
+    print("The Python script has been updated to fix the weekly tab and developer double-click issues.")
     print("Please note: The parts of the script that interact with the local file system (tkinter and shutil) have been commented out for compatibility with this environment.")
     print("You can copy this code and run it in your local Python environment with the required Excel file.")
