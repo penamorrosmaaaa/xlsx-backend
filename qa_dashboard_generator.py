@@ -264,7 +264,7 @@ class ComprehensiveQADashboard:
                         'rechazadas': rechazadas_week,
                         'aceptadas': aceptadas_week,
                         'porcentaje_rechazo': porcentaje_rechazo_week,
-                        'cards': cards_for_week_dev # Add this line
+                        'cards': cards_for_week_dev
                     }
             dev_weekly_details[dev] = weekly_summary
 
@@ -1927,6 +1927,9 @@ class ComprehensiveQADashboard:
                         loadSiteCharts();
                         break;
                     case 'weekly':
+                        // Reset weekly view state when switching to it
+                        weeklyViewStates.showingDetails = false;
+                        weeklyViewStates.lastClickedWeek = null; // Important to reset for correct initial load
                         updateWeeklyView();
                         break;
                 }
@@ -2331,27 +2334,28 @@ class ComprehensiveQADashboard:
         }
 
         // Developer Details and Toggle
-        let lastClickedDev = { name: null, type: null, showingDetails: false };
+        let lastClickedDev = { name: null, type: null, showingDetails: false }; // tracks currently displayed summary view
 
         function showDevDetails(devName, devType) {
             const detailsDivId = devType === 'web' ? 'devWebDetails' : 'devAppDetails';
             const detailsDiv = document.getElementById(detailsDivId);
 
-            // Check if it's a second double-click on the SAME developer and currently showing details (summary)
+            // Check if it's a second double-click on the SAME developer AND currently showing the summary table
             if (lastClickedDev.name === devName && lastClickedDev.type === devType && lastClickedDev.showingDetails) {
-                // Prepare to show detailed cards view with a week selector
+                // This means the summary is currently visible, so we switch to detailed cards
                 const devWeeklyData = devType === 'web' ? statsData.dev_web_weekly_details[devName] : statsData.dev_app_weekly_details[devName];
 
                 let html = `<h3>Detailed Cards for ${devName}</h3>`;
                 
                 // Add a dropdown to select the week for detailed cards
-                html += '<div style="margin-bottom: 1rem;">';
-                html += '<label style="font-weight: 600; margin-right: 0.5rem;">Select Week:</label>';
-                html += '<div class="custom-select">';
+                html += '<div style="margin-bottom: 1rem; display: flex; align-items: center;">'; // Added flex for alignment
+                html += '<label style="font-weight: 600; margin-right: 0.5rem; color: var(--text-primary);">Select Week:</label>';
+                html += '<div class="custom-select" style="min-width: 180px;">'; // Adjusted min-width for dropdown
                 html += `<select id="devWeeklyCardSelector" onchange="displayDevWeeklyCards('${devName}', '${devType}', this.value)">`;
                 html += '<option value="">-- Select a Week --</option>'; // Default empty option
+                
+                // Populate dropdown with weeks where developer has cards
                 for (const week of statsData.weeks_list) {
-                    // Only show weeks where the developer has data and cards
                     if (devWeeklyData[week] && devWeeklyData[week].cards && devWeeklyData[week].cards.length > 0) {
                         html += `<option value="${week}">${week.replace('tarjetas semana ', 'Week ')}</option>`;
                     }
@@ -2364,10 +2368,13 @@ class ComprehensiveQADashboard:
                 detailsDiv.innerHTML = html;
                 detailsDiv.style.display = 'block';
                 detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                lastClickedDev.showingDetails = false; // Reset to false, so the next double click goes back to summary
+                
+                // Crucial: Reset showingDetails to false, so the next double-click on the *same developer*
+                // will revert to the summary view. The week selector is now the primary interaction.
+                lastClickedDev.showingDetails = false; 
 
             } else {
-                // Show weekly summary (first double-click or different developer)
+                // First double-click on a developer (or a different developer) always shows the weekly summary
                 const weeklyData = devType === 'web' ? 
                     statsData.dev_web_weekly_details[devName] : 
                     statsData.dev_app_weekly_details[devName];
@@ -2401,13 +2408,14 @@ class ComprehensiveQADashboard:
                 detailsDiv.style.display = 'block';
                 detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 
+                // Store the current developer and set flag to true (showing summary)
                 lastClickedDev.name = devName;
                 lastClickedDev.type = devType;
-                lastClickedDev.showingDetails = true; // Set to true to indicate summary is showing
+                lastClickedDev.showingDetails = true; 
             }
         }
 
-        // New function to display detailed cards for a specific developer and week
+        // Function to display detailed cards for a specific developer and week
         function displayDevWeeklyCards(devName, devType, selectedWeek) {
             const devWeeklyData = devType === 'web' ? statsData.dev_web_weekly_details[devName] : statsData.dev_app_weekly_details[devName];
             const cards = devWeeklyData[selectedWeek] ? devWeeklyData[selectedWeek].cards : [];
@@ -2422,9 +2430,7 @@ class ComprehensiveQADashboard:
                         ? 'badge-danger'
                         : card['Aceptado/Rechazado'] === 'APROBADO'
                         ? 'badge-success'
-                        : card['Aceptado/Rechazado'] === 'PENDIENTE' // Handle PENDIENTE case
-                        ? 'badge-warning'
-                        : 'badge-warning'; // Default for unknown statuses
+                        : 'badge['Aceptado/Rechazado'] === 'PENDIENTE' ? 'badge-warning' : 'badge-warning'; // Fallback
 
                     const description = card['Descripción'] || 'No Description Available';
 
@@ -2439,44 +2445,25 @@ class ComprehensiveQADashboard:
         }
 
 
-        // Weekly View Logic
-        let lastClickedWeek = null;
-        let showingDetails = false;
+        // Weekly View State management (moved to a dedicated object for clarity)
+        const weeklyViewStates = {
+            lastClickedWeek: null,
+            showingDetails: false // false = summary, true = detailed cards
+        };
 
         function updateWeeklyView() {
             const selectedWeek = document.getElementById('weekSelector').value;
+            const weeklyContentDiv = document.getElementById('weeklyContent');
 
-            if (selectedWeek === lastClickedWeek && showingDetails) {
-                // Show specific cards if double-clicked again
-                const cards = statsData.cards_by_week[selectedWeek];
+            // If the selected week is different, always show summary first
+            if (selectedWeek !== weeklyViewStates.lastClickedWeek) {
+                weeklyViewStates.showingDetails = false;
+            }
 
-                let html = `<h3>Tarjetas de la semana: ${selectedWeek}</h3>`;
-                html += '<div class="table-container"><table><thead><tr><th>Descripción</th><th>Estado</th></tr></thead><tbody>';
-
-                for (const card of cards) {
-                    const badgeClass = card['Aceptado/Rechazado'] === 'RECHAZADO'
-                        ? 'badge-danger'
-                        : card['Aceptado/Rechazado'] === 'APROBADO'
-                        ? 'badge-success'
-                        : 'badge-warning';
-
-                    // Check if 'Descripción' exists, otherwise show a placeholder or just the status
-                    const description = card['Descripción'] || 'No Description'; 
-
-                    html += `<tr>
-                                <td>${description}</td>
-                                <td><span class="badge ${badgeClass}">${card['Aceptado/Rechazado']}</span></td>
-                            </tr>`;
-                }
-
-                html += '</tbody></table></div>';
-                document.getElementById('weeklyContent').innerHTML = html;
-                showingDetails = false; // Reset flag to show summary on next single click
-            } else {
-                // Regular summary view (first click or different week)
-                lastClickedWeek = selectedWeek;
-                showingDetails = true; // Set flag to indicate summary is currently showing
-
+            if (weeklyViewStates.showingDetails) {
+                // Currently showing details, so switch back to summary
+                weeklyViewStates.showingDetails = false;
+                
                 const weekData = {
                     qa: statsData.qa.weekly[selectedWeek],
                     web: statsData.web.weekly[selectedWeek],
@@ -2564,9 +2551,40 @@ class ComprehensiveQADashboard:
                 }
 
                 html += '</tbody></table></div>';
-                document.getElementById('weeklyContent').innerHTML = html;
+                weeklyContentDiv.innerHTML = html;
+            } else {
+                // Currently showing summary (or initial load), so switch to detailed cards
+                weeklyViewStates.showingDetails = true;
+                
+                const cards = statsData.cards_by_week[selectedWeek];
+
+                let html = `<h3>Tarjetas de la semana: ${selectedWeek}</h3>`;
+                html += '<div class="table-container"><table><thead><tr><th>Descripción</th><th>Estado</th></tr></thead><tbody>';
+
+                if (cards.length === 0) {
+                    html += '<tr><td colspan="2" style="text-align: center;">No cards found for this week.</td></tr>';
+                } else {
+                    for (const card of cards) {
+                        const badgeClass = card['Aceptado/Rechazado'] === 'RECHAZADO'
+                            ? 'badge-danger'
+                            : card['Aceptado/Rechazado'] === 'APROBADO'
+                            ? 'badge-success'
+                            : 'badge-warning'; // Default for PENDIENTE or other statuses
+
+                        const description = card['Descripción'] || 'No Description Available'; 
+
+                        html += `<tr>
+                                    <td>${description}</td>
+                                    <td><span class="badge ${badgeClass}">${card['Aceptado/Rechazado']}</span></td>
+                                </tr>`;
+                    }
+                }
+                html += '</tbody></table></div>';
+                weeklyContentDiv.innerHTML = html;
             }
+            weeklyViewStates.lastClickedWeek = selectedWeek; // Update the last clicked week
         }
+
 
         // Update charts when theme changes
         function updateCharts() {
@@ -2592,7 +2610,10 @@ class ComprehensiveQADashboard:
             // Initialize weekly view
             if (statsData.weeks_list.length > 0) {
                 document.getElementById('weekSelector').value = statsData.weeks_list[statsData.weeks_list.length - 1];
-                updateWeeklyView(); // Initial load for the weekly tab
+                // Manually call updateWeeklyView to ensure it starts in summary mode on first load
+                // (as showTab('weekly') will call it, but we need to ensure the state is correctly set)
+                weeklyViewStates.showingDetails = false; // Ensure it starts in summary mode
+                updateWeeklyView();
             }
 
             // Add hover effects to cards
@@ -2606,8 +2627,11 @@ class ComprehensiveQADashboard:
             });
 
              // Add double-click listener to the weekSelector dropdown
-             document.getElementById('weekSelector').addEventListener('dblclick', function() {
-                updateWeeklyView(); // Trigger the view update
+             // This event listener will trigger the toggle logic in updateWeeklyView
+             document.getElementById('weekSelector').addEventListener('dblclick', function(event) {
+                // Prevent the default behavior if the dblclick is on the select element itself
+                // event.preventDefault(); // Might not be needed, but useful if weird behavior occurs
+                updateWeeklyView(); 
             });
         });
 
@@ -2646,6 +2670,6 @@ class ComprehensiveQADashboard:
             print(f"Error al guardar o abrir el dashboard: {e}")
 
 if __name__ == "__main__":
-    print("The Python script has been updated to include 'Tester' in the QA section and double-click functionality for weekly card details, including for developers.")
+    print("The Python script has been updated to fix the weekly tab and developer double-click issues.")
     print("Please note: The parts of the script that interact with the local file system (tkinter and shutil) have been commented out for compatibility with this environment.")
     print("You can copy this code and run it in your local Python environment with the required Excel file.")
