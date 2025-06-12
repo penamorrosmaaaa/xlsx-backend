@@ -87,7 +87,8 @@ class ComprehensiveQADashboard:
             'Web/App': ['web/app', 'web o app'],
             'Sitio': ['sitio'],
             'Plataforma': ['plataforma'],
-            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad']
+            'Prioridad en la Tarjeta': ['prioridad en la tarjeta', 'prioridad'],
+            'Descripción': ['descripción', 'description'] # Ensure 'Descripción' is correctly mapped
         }
 
         for expected_col, variations in expected_cols_mapping.items():
@@ -254,12 +255,16 @@ class ComprehensiveQADashboard:
                 aceptadas_week = len(week_dev_data[week_dev_data['Aceptado/Rechazado'] == 'APROBADO'])
                 porcentaje_rechazo_week = round((rechazadas_week / total_week * 100) if total_week > 0 else 0, 2)
 
+                # Get detailed cards for the week and developer
+                cards_for_week_dev = week_dev_data[['Descripción', 'Aceptado/Rechazado']].fillna("Desconocido").to_dict('records')
+
                 if total_week > 0:
                     weekly_summary[semana] = {
                         'total_tarjetas': total_week,
                         'rechazadas': rechazadas_week,
                         'aceptadas': aceptadas_week,
-                        'porcentaje_rechazo': porcentaje_rechazo_week
+                        'porcentaje_rechazo': porcentaje_rechazo_week,
+                        'cards': cards_for_week_dev # Add this line
                     }
             dev_weekly_details[dev] = weekly_summary
 
@@ -393,7 +398,6 @@ class ComprehensiveQADashboard:
 
         return cleaned_counts
 
-    # ✅ STEP 1: Add function for cards by week
     def get_cards_by_week(self, week):
         """Devuelve las tarjetas detalladas (descripción y estado) por semana"""
         week_data = self.all_data[self.all_data['Semana'] == week]
@@ -428,7 +432,6 @@ class ComprehensiveQADashboard:
             'total_weeks': len(self.weeks_list)
         }
 
-        # ✅ STEP 2: Add cards_by_week to your JSON of stats
         stats['cards_by_week'] = {
             week: self.get_cards_by_week(week) for week in self.weeks_list
         }
@@ -2327,44 +2330,114 @@ class ComprehensiveQADashboard:
             Plotly.newPlot('siteChart', siteTraces, siteLayout, plotlyConfig);
         }
 
-        // Developer Details
+        // Developer Details and Toggle
+        let lastClickedDev = { name: null, type: null, showingDetails: false };
+
         function showDevDetails(devName, devType) {
-            const weeklyData = devType === 'web' ? 
-                statsData.dev_web_weekly_details[devName] : 
-                statsData.dev_app_weekly_details[devName];
-            
-            const targetDiv = devType === 'web' ? 'devWebDetails' : 'devAppDetails';
-            
-            let html = `<h3>Weekly Performance: ${devName}</h3>`;
-            html += '<table style="width: 100%; margin-top: 1rem;">';
-            html += '<thead><tr><th>Week</th><th>Total Cards</th><th>Rejected</th><th>Accepted</th><th>Rejection Rate</th></tr></thead><tbody>';
-            
-            if (!weeklyData || Object.keys(weeklyData).length === 0) {
-                html += '<tr><td colspan="5" style="text-align: center;">No weekly data available</td></tr>';
-            } else {
+            const detailsDivId = devType === 'web' ? 'devWebDetails' : 'devAppDetails';
+            const detailsDiv = document.getElementById(detailsDivId);
+
+            // Check if it's a second double-click on the SAME developer and currently showing details (summary)
+            if (lastClickedDev.name === devName && lastClickedDev.type === devType && lastClickedDev.showingDetails) {
+                // Prepare to show detailed cards view with a week selector
+                const devWeeklyData = devType === 'web' ? statsData.dev_web_weekly_details[devName] : statsData.dev_app_weekly_details[devName];
+
+                let html = `<h3>Detailed Cards for ${devName}</h3>`;
+                
+                // Add a dropdown to select the week for detailed cards
+                html += '<div style="margin-bottom: 1rem;">';
+                html += '<label style="font-weight: 600; margin-right: 0.5rem;">Select Week:</label>';
+                html += '<div class="custom-select">';
+                html += `<select id="devWeeklyCardSelector" onchange="displayDevWeeklyCards('${devName}', '${devType}', this.value)">`;
+                html += '<option value="">-- Select a Week --</option>'; // Default empty option
                 for (const week of statsData.weeks_list) {
-                    const data = weeklyData[week];
-                    if (data) {
-                        const badgeClass = data.porcentaje_rechazo > 20 ? 'badge-danger' : 
-                                             data.porcentaje_rechazo > 10 ? 'badge-warning' : 'badge-success';
-                        html += `<tr>
-                                <td>${week.replace('tarjetas semana ', 'Week ')}</td>
-                                <td>${data.total_tarjetas}</td>
-                                <td>${data.rechazadas}</td>
-                                <td>${data.aceptadas}</td>
-                                <td><span class="badge ${badgeClass}">${data.porcentaje_rechazo}%</span></td>
-                            </tr>`;
+                    // Only show weeks where the developer has data and cards
+                    if (devWeeklyData[week] && devWeeklyData[week].cards && devWeeklyData[week].cards.length > 0) {
+                        html += `<option value="${week}">${week.replace('tarjetas semana ', 'Week ')}</option>`;
                     }
                 }
+                html += '</select>';
+                html += '</div></div>';
+
+                html += '<div id="devCardsByWeekContent"></div>'; // This will be populated by displayDevWeeklyCards
+
+                detailsDiv.innerHTML = html;
+                detailsDiv.style.display = 'block';
+                detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                lastClickedDev.showingDetails = false; // Reset to false, so the next double click goes back to summary
+
+            } else {
+                // Show weekly summary (first double-click or different developer)
+                const weeklyData = devType === 'web' ? 
+                    statsData.dev_web_weekly_details[devName] : 
+                    statsData.dev_app_weekly_details[devName];
+                
+                let html = `<h3>Weekly Performance: ${devName}</h3>`;
+                html += '<table style="width: 100%; margin-top: 1rem;">';
+                html += '<thead><tr><th>Week</th><th>Total Cards</th><th>Rejected</th><th>Accepted</th><th>Rejection Rate</th></tr></thead><tbody>';
+                
+                if (!weeklyData || Object.keys(weeklyData).length === 0) {
+                    html += '<tr><td colspan="5" style="text-align: center;">No weekly data available</td></tr>';
+                } else {
+                    for (const week of statsData.weeks_list) {
+                        const data = weeklyData[week];
+                        if (data) {
+                            const badgeClass = data.porcentaje_rechazo > 20 ? 'badge-danger' : 
+                                                 data.porcentaje_rechazo > 10 ? 'badge-warning' : 'badge-success';
+                            html += `<tr>
+                                    <td>${week.replace('tarjetas semana ', 'Week ')}</td>
+                                    <td>${data.total_tarjetas}</td>
+                                    <td>${data.rechazadas}</td>
+                                    <td>${data.aceptadas}</td>
+                                    <td><span class="badge ${badgeClass}">${data.porcentaje_rechazo}%</span></td>
+                                </tr>`;
+                        }
+                    }
+                }
+                
+                html += '</tbody></table>';
+                
+                detailsDiv.innerHTML = html;
+                detailsDiv.style.display = 'block';
+                detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                
+                lastClickedDev.name = devName;
+                lastClickedDev.type = devType;
+                lastClickedDev.showingDetails = true; // Set to true to indicate summary is showing
             }
-            
-            html += '</tbody></table>';
-            
-            const detailsDiv = document.getElementById(targetDiv);
-            detailsDiv.innerHTML = html;
-            detailsDiv.style.display = 'block';
-            detailsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
+
+        // New function to display detailed cards for a specific developer and week
+        function displayDevWeeklyCards(devName, devType, selectedWeek) {
+            const devWeeklyData = devType === 'web' ? statsData.dev_web_weekly_details[devName] : statsData.dev_app_weekly_details[devName];
+            const cards = devWeeklyData[selectedWeek] ? devWeeklyData[selectedWeek].cards : [];
+
+            let cardsHtml = '<div class="table-container" style="margin-top: 1rem;"><table><thead><tr><th>Descripción</th><th>Estado</th></tr></thead><tbody>';
+
+            if (cards.length === 0) {
+                cardsHtml += '<tr><td colspan="2" style="text-align: center;">No cards found for this week.</td></tr>';
+            } else {
+                for (const card of cards) {
+                    const badgeClass = card['Aceptado/Rechazado'] === 'RECHAZADO'
+                        ? 'badge-danger'
+                        : card['Aceptado/Rechazado'] === 'APROBADO'
+                        ? 'badge-success'
+                        : card['Aceptado/Rechazado'] === 'PENDIENTE' // Handle PENDIENTE case
+                        ? 'badge-warning'
+                        : 'badge-warning'; // Default for unknown statuses
+
+                    const description = card['Descripción'] || 'No Description Available';
+
+                    cardsHtml += `<tr>
+                                    <td>${description}</td>
+                                    <td><span class="badge ${badgeClass}">${card['Aceptado/Rechazado']}</span></td>
+                                 </tr>`;
+                }
+            }
+            cardsHtml += '</tbody></table></div>';
+            document.getElementById('devCardsByWeekContent').innerHTML = cardsHtml;
+        }
+
 
         // Weekly View Logic
         let lastClickedWeek = null;
@@ -2374,7 +2447,7 @@ class ComprehensiveQADashboard:
             const selectedWeek = document.getElementById('weekSelector').value;
 
             if (selectedWeek === lastClickedWeek && showingDetails) {
-                // ✅ STEP 3: Show specific cards if double-clicked again
+                // Show specific cards if double-clicked again
                 const cards = statsData.cards_by_week[selectedWeek];
 
                 let html = `<h3>Tarjetas de la semana: ${selectedWeek}</h3>`;
@@ -2573,51 +2646,6 @@ class ComprehensiveQADashboard:
             print(f"Error al guardar o abrir el dashboard: {e}")
 
 if __name__ == "__main__":
-    # The tkinter and shutil parts are commented out as they are not directly
-    # runnable in this environment and were causing import errors.
-    # The core logic of the dashboard class remains functional.
-    # import tkinter as tk
-    # from tkinter import filedialog, messagebox
-    # import shutil
-
-    # root = tk.Tk()
-    # root.withdraw()
-
-    # file_path = filedialog.askopenfilename(
-    #    title="Select the new Excel file",
-    #    filetypes=[("Excel files", "*.xlsx")]
-    # )
-
-    # if not file_path:
-    #    print("❌ No file selected. Exiting.")
-    #    exit()
-
-    # try:
-    #    # Replace the old Excel file
-    #    shutil.copy(file_path, 'reporte_tarjetas.xlsx')
-    #    print("✅ Excel file replaced.")
-
-    #    # Generate dashboard
-    #    dashboard = ComprehensiveQADashboard()
-    #    dashboard.save_dashboard(filename="qa-dashboard.html")
-    #    messagebox.showinfo("Dashboard Updated", "Dashboard generated and opened successfully!")
-
-    # except Exception as e:
-    #    messagebox.showerror("Error", f"Something went wrong:\n{e}")
-
-    # import shutil
-
-    # # Ruta completa del archivo generado
-    # source = 'qa-dashboard.html'
-
-    # # Ruta donde está la carpeta `public/` de tu React app
-    # destination = '/Users/manuelpenamorros/Desktop/DASHTVA/public/qa-dashboard.html'
-
-    # try:
-    #    shutil.move(source, destination)
-    #    print("✅ ¡Archivo movido correctamente a la carpeta public de React!")
-    # except Exception as e:
-    #    print(f"❌ Error al mover el archivo: {e}")
-    print("The Python script has been updated to include 'Tester' in the QA section and double-click functionality for weekly card details.")
+    print("The Python script has been updated to include 'Tester' in the QA section and double-click functionality for weekly card details, including for developers.")
     print("Please note: The parts of the script that interact with the local file system (tkinter and shutil) have been commented out for compatibility with this environment.")
     print("You can copy this code and run it in your local Python environment with the required Excel file.")
